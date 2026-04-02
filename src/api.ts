@@ -21,6 +21,7 @@ import {
   callWorkerGen,
   actionChannel as untypedActionChannel,
   flush,
+  allSettled,
 } from './effects';
 import {
   takeEvery as untypedTakeEvery,
@@ -123,6 +124,7 @@ export interface SagaApi<State> {
   retry: typeof retry;
   race: typeof race;
   all: typeof all;
+  allSettled: typeof allSettled;
   callWorker: typeof callWorker;
   forkWorker: typeof forkWorker;
   spawnWorker: typeof spawnWorker;
@@ -166,6 +168,7 @@ export function createSagaApi<State>(): SagaApi<State> {
     retry,
     race,
     all,
+    allSettled,
     callWorker,
     forkWorker,
     spawnWorker,

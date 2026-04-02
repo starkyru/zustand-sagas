@@ -1,6 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { take, call, select, fork, spawn, cancel, delay, race, all } from '../src/effects';
-import { TAKE, CALL, SELECT, FORK, SPAWN, CANCEL, DELAY, RACE, ALL } from '../src/types';
+import {
+  take,
+  call,
+  select,
+  fork,
+  spawn,
+  cancel,
+  delay,
+  race,
+  all,
+  allSettled,
+} from '../src/effects';
+import {
+  TAKE,
+  CALL,
+  SELECT,
+  FORK,
+  SPAWN,
+  CANCEL,
+  DELAY,
+  RACE,
+  ALL,
+  ALL_SETTLED,
+} from '../src/types';
 
 describe('effect creators', () => {
   it('take creates a TakeEffect with string pattern', () => {
@@ -81,6 +103,13 @@ describe('effect creators', () => {
     const effects = [take('actionA'), take('actionB')];
     const effect = all(effects);
     expect(effect.type).toBe(ALL);
+    expect(effect.effects).toBe(effects);
+  });
+
+  it('allSettled creates an AllSettledEffect', () => {
+    const effects = [take('actionA'), take('actionB')];
+    const effect = allSettled(effects);
+    expect(effect.type).toBe(ALL_SETTLED);
     expect(effect.effects).toBe(effects);
   });
 });

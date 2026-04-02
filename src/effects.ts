@@ -18,6 +18,7 @@ import {
   CALL_WORKER_GEN,
   RACE,
   ALL,
+  ALL_SETTLED,
   ACTION_CHANNEL,
   FLUSH,
   type TakeEffect,
@@ -34,6 +35,7 @@ import {
   type DelayEffect,
   type RaceEffect,
   type AllEffect,
+  type AllSettledEffect,
   type CallWorkerEffect,
   type ForkWorkerEffect,
   type SpawnWorkerEffect,
@@ -123,6 +125,10 @@ export function race(effects: Record<string, Effect>): RaceEffect {
 
 export function all(effects: Effect[]): AllEffect {
   return { type: ALL, effects };
+}
+
+export function allSettled(effects: Effect[]): AllSettledEffect {
+  return { type: ALL_SETTLED, effects };
 }
 
 export function actionChannel(

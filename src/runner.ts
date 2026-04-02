@@ -27,6 +27,7 @@ import {
   CALL_WORKER_GEN,
   RACE,
   ALL,
+  ALL_SETTLED,
   ACTION_CHANNEL,
   FLUSH,
   type Effect,
@@ -452,6 +453,15 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       case ALL: {
         const results = await Promise.all(effect.effects.map((eff) => processEffect(eff)));
         return results;
+      }
+
+      case ALL_SETTLED: {
+        const results = await Promise.allSettled(effect.effects.map((eff) => processEffect(eff)));
+        return results.map((r) =>
+          r.status === 'fulfilled'
+            ? { status: 'fulfilled' as const, value: r.value }
+            : { status: 'rejected' as const, reason: r.reason },
+        );
       }
 
       default:

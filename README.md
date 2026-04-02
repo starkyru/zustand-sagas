@@ -537,6 +537,30 @@ function* saga({ all, call }) {
 }
 ```
 
+#### `allSettled(effects)`
+
+Like `all`, but never rejects. Waits for every effect to settle (succeed or fail) and returns an array of result objects — matching the `Promise.allSettled` contract.
+
+Each result is either `{ status: 'fulfilled', value }` or `{ status: 'rejected', reason }`.
+
+```ts
+function* saga({ allSettled, call }) {
+  const results = yield allSettled([
+    call(fetchUsers),
+    call(fetchPosts),
+    call(fetchComments),
+  ]);
+
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      console.log('got:', r.value);
+    } else {
+      console.error('failed:', r.reason);
+    }
+  }
+}
+```
+
 #### `actionChannel(pattern, buffer?)`
 
 Creates a buffered channel that queues store actions matching `pattern`. Use with `take(channel)` to process actions sequentially with backpressure.
@@ -1202,7 +1226,7 @@ Both libraries share the same generator-based mental model:
 - **`fork` / `spawn`** — start concurrent tasks (attached vs detached)
 - **`cancel`** / **`join`** — task lifecycle control
 - **`delay`** / **`retry`** — timing utilities
-- **`race` / `all`** — concurrency combinators
+- **`race` / `all` / `allSettled`** — concurrency combinators
 - **`takeEvery`, `takeLatest`, `takeLeading`, `debounce`, `throttle`** — high-level watcher patterns
 - **`channel`, `eventChannel`, `actionChannel`** — buffered channels and external event sources
 - **`END`** — channel termination signal

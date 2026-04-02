@@ -164,6 +164,37 @@ describe('integration', () => {
     store.sagaTask.cancel();
   });
 
+  it('allSettled: waits for all effects, captures successes and failures', async () => {
+    let result: unknown;
+
+    const store = createStore(
+      sagas(
+        function* ({ take, call, delay, allSettled }) {
+          yield take('go');
+          result = yield allSettled([
+            delay(10),
+            call(() => 'ok'),
+            call(() => {
+              throw new Error('boom');
+            }),
+          ]);
+        },
+        (set) => ({
+          go: () => {},
+        }),
+      ),
+    );
+
+    store.getState().go();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(result).toEqual([
+      { status: 'fulfilled', value: undefined },
+      { status: 'fulfilled', value: 'ok' },
+      { status: 'rejected', reason: new Error('boom') },
+    ]);
+    store.sagaTask.cancel();
+  });
+
   it('error handling in saga with try/catch', async () => {
     const store = createStore(
       sagas(

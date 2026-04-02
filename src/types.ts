@@ -62,6 +62,7 @@ export const FORK_WORKER_CHANNEL: unique symbol = Symbol('FORK_WORKER_CHANNEL');
 export const CALL_WORKER_GEN: unique symbol = Symbol('CALL_WORKER_GEN');
 export const RACE: unique symbol = Symbol('RACE');
 export const ALL: unique symbol = Symbol('ALL');
+export const ALL_SETTLED: unique symbol = Symbol('ALL_SETTLED');
 
 export interface TakeEffect<Value = any> {
   type: typeof TAKE;
@@ -191,6 +192,23 @@ export interface AllEffect {
   effects: Effect[];
 }
 
+export interface AllSettledEffect {
+  type: typeof ALL_SETTLED;
+  effects: Effect[];
+}
+
+export interface SettledFulfilled<T = unknown> {
+  status: 'fulfilled';
+  value: T;
+}
+
+export interface SettledRejected {
+  status: 'rejected';
+  reason: unknown;
+}
+
+export type SettledResult<T = unknown> = SettledFulfilled<T> | SettledRejected;
+
 export type Effect =
   | TakeEffect
   | TakeMaybeEffect
@@ -206,6 +224,7 @@ export type Effect =
   | DelayEffect
   | RaceEffect
   | AllEffect
+  | AllSettledEffect
   | CallWorkerEffect
   | ForkWorkerEffect
   | SpawnWorkerEffect
