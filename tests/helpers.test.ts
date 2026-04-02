@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { runSaga, type RunnerEnv } from '../src/runner';
 import { ActionChannel } from '../src/channel';
 import { takeEvery, takeLatest, takeLeading, debounce, throttle } from '../src/helpers';
-import { delay, select, call } from '../src/effects';
-import type { Effect, ActionEvent } from '../src/types';
+import { delay } from '../src/effects';
+import type { ActionEvent } from '../src/types';
 
 function createEnv(state: Record<string, unknown> = {}): RunnerEnv {
   return {

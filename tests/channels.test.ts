@@ -188,7 +188,7 @@ describe('eventChannel', () => {
 
   it('close calls unsubscribe', () => {
     let unsubscribed = false;
-    const chan = eventChannel<number>((emit) => {
+    const chan = eventChannel<number>((_emit) => {
       return () => {
         unsubscribed = true;
       };

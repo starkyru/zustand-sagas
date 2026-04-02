@@ -130,7 +130,7 @@ describe('createSaga', () => {
     const store = createStore<{
       data: string | null;
       fetchData: () => void;
-    }>((set) => ({
+    }>((_set) => ({
       data: null,
       fetchData: () => {},
     }));

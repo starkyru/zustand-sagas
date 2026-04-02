@@ -48,7 +48,8 @@ export { buffers } from './buffers';
 export type { Buffer } from './buffers';
 
 // Worker platform (for advanced/testing use)
-export type { WorkerHandle, WorkerPlatform } from './workerPlatform';
+export { configureWorkers } from './workerPlatform';
+export type { WorkerHandle, WorkerPlatform, WorkerConfig } from './workerPlatform';
 
 // Testing utilities
 export { createMockTask } from './testing';

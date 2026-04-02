@@ -65,11 +65,11 @@ store.getState().increment(5)
 
 ### Payload convention
 
-| Call                  | `payload`            |
-|-----------------------|----------------------|
-| `increment()`         | `undefined`          |
-| `addTodo('buy milk')` | `'buy milk'`         |
-| `setPosition(10, 20)` | `[10, 20]`          |
+| Call                  | `payload`    |
+|-----------------------|--------------|
+| `increment()`         | `undefined`  |
+| `addTodo('buy milk')` | `'buy milk'` |
+| `setPosition(10, 20)` | `[10, 20]`   |
 
 ## API Reference
 
@@ -452,6 +452,22 @@ Main → Worker:  { type: 'response', value: ... }   // handler's response
 Worker → Main:  { type: 'result', value: ... }      // final return
 ```
 
+#### `configureWorkers(config)`
+
+Configures worker code generation. Call once before any worker effects are used.
+
+```ts
+import { configureWorkers } from 'zustand-sagas';
+
+configureWorkers({ nodeWorkerMode: 'esm' });
+```
+
+| Option           | Default | Description                                                                                                                                                                   |
+|------------------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `nodeWorkerMode` | `'cjs'` | `'cjs'` generates `require()` workers (CommonJS). `'esm'` generates `import` workers via data URLs — required when the host project sets `"type": "module"` in package.json.  |
+
+> **Note:** This only affects Node.js worker threads. Browser Web Workers are always generated as plain scripts regardless of this setting.
+
 #### `join(task)`
 
 Waits for a forked/spawned task to complete. Returns the task's result.
@@ -740,13 +756,13 @@ Buffer strategies control how channels store messages when no taker is ready.
 import { buffers } from 'zustand-sagas';
 ```
 
-| Buffer | Behavior |
-| --- | --- |
-| `buffers.none()` | Zero capacity — items dropped if no taker is waiting |
-| `buffers.fixed(limit?)` | Throws on overflow (default limit: 10) |
-| `buffers.dropping(limit)` | Silently drops new items when full |
-| `buffers.sliding(limit)` | Drops oldest item when full |
-| `buffers.expanding(initial?)` | Grows dynamically, never drops (default) |
+| Buffer                        | Behavior                                             |
+|-------------------------------|------------------------------------------------------|
+| `buffers.none()`              | Zero capacity — items dropped if no taker is waiting |
+| `buffers.fixed(limit?)`       | Throws on overflow (default limit: 10)               |
+| `buffers.dropping(limit)`     | Silently drops new items when full                   |
+| `buffers.sliding(limit)`      | Drops oldest item when full                          |
+| `buffers.expanding(initial?)` | Grows dynamically, never drops (default)             |
 
 ```ts
 // Channel with a sliding window of 100 items
@@ -1221,16 +1237,30 @@ store.getState().incrementAsync();
 
 ### What's different
 
-| | redux-saga | zustand-sagas |
-| --- | --- | --- |
-| **Actions** | String constants + action creator functions | Store function names (automatic) |
-| **Dispatching** | `dispatch({ type: 'INCREMENT' })` | `store.getState().increment()` |
-| **State mutation** | `put()` dispatches to reducer | State updated directly in store actions |
-| **Saga triggers** | Intercepts dispatched action objects | Intercepts store function calls |
-| **Saga-to-saga** | `put({ type, payload })` | `put('actionName', ...args)` |
-| **Boilerplate** | Action types + action creators + reducer + saga | Store actions + saga |
-| **Store** | Redux | Zustand |
-| **TypeScript** | Partial (heavy use of `any`) | Full — action names, payloads, selectors, channels, and task results are all type-checked |
+- **Actions**
+  — redux-saga: string constants + action creator functions.
+  - zustand-sagas: store function names (automatic).
+- **Dispatching**
+  — redux-saga: `dispatch({ type: 'INCREMENT' })`.
+  - zustand-sagas: `store.getState().increment()`.
+- **State mutation**
+  — redux-saga: `put()` dispatches to reducer.
+  - zustand-sagas: state updated directly in store actions.
+- **Saga triggers**
+  — redux-saga: intercepts dispatched action objects.
+  - zustand-sagas: intercepts store function calls.
+- **Saga-to-saga**
+  — redux-saga: `put({ type, payload })`.
+  - zustand-sagas: `put('actionName', ...args)`.
+- **Boilerplate**
+  — redux-saga: action types + action creators + reducer + saga.
+  - zustand-sagas: store actions + saga.
+- **Store**
+  — redux-saga: Redux.
+  - ustand-sagas: Zustand.
+- **TypeScript**
+  — redux-saga: partial (heavy use of `any`).
+  - zustand-sagas: full — action names, payloads, selectors, channels, and task results are all type-checked.
 
 ### What's the same
 
@@ -1380,14 +1410,14 @@ yield select((s) => s.count);      // s: Store, returns number
 
 Effect types are generic where it matters:
 
-| Effect | Generic | Preserves |
-|---|---|---|
-| `TakeEffect<Value>` | Channel value type | `take(channel)` keeps `Value` |
-| `TakeMaybeEffect<Value>` | Channel value type | Same |
-| `JoinEffect<Result>` | Task result type | `join(task)` keeps `Result` |
-| `CancelEffect<Result>` | Task result type | `cancel(task)` keeps `Result` |
-| `FlushEffect<Value>` | Channel value type | `flush(channel)` keeps `Value` |
-| `Task<Result>` | Result type | `fork`/`spawn` return typed tasks |
+| Effect                   | Generic            | Preserves                         |
+|--------------------------|--------------------|-----------------------------------|
+| `TakeEffect<Value>`      | Channel value type | `take(channel)` keeps `Value`     |
+| `TakeMaybeEffect<Value>` | Channel value type | Same                              |
+| `JoinEffect<Result>`     | Task result type   | `join(task)` keeps `Result`       |
+| `CancelEffect<Result>`   | Task result type   | `cancel(task)` keeps `Result`     |
+| `FlushEffect<Value>`     | Channel value type | `flush(channel)` keeps `Value`    |
+| `Task<Result>`           | Result type        | `fork`/`spawn` return typed tasks |
 
 All generics have defaults, so unparameterized usage (`TakeEffect`, `JoinEffect`, etc.) works unchanged.
 
@@ -1424,6 +1454,7 @@ import type {
   WorkerFn,            // Function or URL accepted by worker effects
   ForkWorkerChannelEffect,  // forkWorkerChannel effect type
   CallWorkerGenEffect,      // callWorkerGen effect type
+  WorkerConfig,        // configureWorkers option type
   MockTask,            // createMockTask return type (Task + setters)
   CloneableGenerator,  // Cloneable generator for testing
   AsyncSlice,          // Mapped type for async resource state + actions

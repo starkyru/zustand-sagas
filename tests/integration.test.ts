@@ -15,7 +15,7 @@ describe('integration', () => {
             yield call(() => store.setState((s) => ({ ...s, count: count + 1 })));
           });
         },
-        (set) => ({
+        (_set) => ({
           count: 0,
           incrementAsync: () => {},
         }),
@@ -35,7 +35,7 @@ describe('integration', () => {
   it('race: timeout wins over slow action', async () => {
     let result: Record<string, unknown> | undefined;
 
-    const store = createStore(
+    createStore(
       sagas(
         function* ({ take, race, delay }) {
           result = yield race({
@@ -43,7 +43,7 @@ describe('integration', () => {
             timeout: delay(30),
           });
         },
-        (set) => ({
+        (_set) => ({
           slowAction: () => {},
         }),
       ),
@@ -69,7 +69,7 @@ describe('integration', () => {
             timeout: delay(500),
           });
         },
-        (set) => ({
+        (_set) => ({
           fastAction: () => {},
         }),
       ),
@@ -117,7 +117,7 @@ describe('integration', () => {
   it('nested forks', async () => {
     const log: string[] = [];
 
-    const store = createStore(
+    createStore(
       sagas(
         function* ({ fork, delay }) {
           function* child2() {
@@ -152,7 +152,7 @@ describe('integration', () => {
           yield take('go');
           result = yield all([delay(10), delay(20), select((s: any) => s.value)]);
         },
-        (set) => ({
+        (_set) => ({
           value: 'test',
           go: () => {},
         }),
@@ -180,7 +180,7 @@ describe('integration', () => {
             }),
           ]);
         },
-        (set) => ({
+        (_set) => ({
           go: () => {},
         }),
       ),
@@ -205,7 +205,7 @@ describe('integration', () => {
           yield until('ready');
           resolved = true;
         },
-        (set) => ({
+        (_set) => ({
           ready: true,
         }),
       ),
@@ -274,7 +274,7 @@ describe('integration', () => {
         function* ({ until }) {
           result = yield until('ready', 30);
         },
-        (set) => ({
+        (_set) => ({
           ready: false,
         }),
       ),
@@ -318,7 +318,7 @@ describe('integration', () => {
             timeout: delay(10_000),
           });
         },
-        (set) => ({
+        (_set) => ({
           fastAction: () => {},
         }),
       ),
@@ -340,7 +340,7 @@ describe('integration', () => {
 
     const store = createStore(
       sagas(
-        function* ({ fork, delay, call }) {
+        function* ({ fork, delay }) {
           function* failingChild() {
             yield delay(5);
             throw new Error('child-fail');
@@ -356,7 +356,7 @@ describe('integration', () => {
             caughtError = e.message;
           }
         },
-        (set) => ({}),
+        (_set) => ({}),
       ),
     );
 
@@ -379,7 +379,7 @@ describe('integration', () => {
             yield call(() => log.push('worker2'));
           });
         },
-        (set) => ({
+        (_set) => ({
           ping: () => {},
         }),
       ),
@@ -410,7 +410,7 @@ describe('integration', () => {
             yield call(() => store.setState((s) => ({ ...s, error: e.message })));
           }
         },
-        (set) => ({
+        (_set) => ({
           error: null as string | null,
         }),
       ),

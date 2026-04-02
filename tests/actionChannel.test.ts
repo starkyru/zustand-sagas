@@ -3,8 +3,7 @@ import { createStore } from 'zustand/vanilla';
 import { createSaga } from '../src/createSaga';
 import { runSaga, type RunnerEnv } from '../src/runner';
 import { ActionChannel } from '../src/channel';
-import { take, actionChannel, flush, call, delay } from '../src/effects';
-import { END } from '../src/channels';
+import { take, actionChannel, flush, delay } from '../src/effects';
 
 describe('actionChannel effect', () => {
   it('buffers actions for sequential processing', async () => {
@@ -16,7 +15,7 @@ describe('actionChannel effect', () => {
       request: () => {},
     }));
 
-    const useSaga = createSaga(store, function* ({ actionChannel, take, call, delay }) {
+    const useSaga = createSaga(store, function* ({ actionChannel, take, delay }) {
       const chan = yield actionChannel('request');
 
       while (true) {
@@ -56,13 +55,38 @@ describe('actionChannel effect', () => {
       processed.push(a2.type);
     }
 
-    const task = runSaga(saga, env);
+    runSaga(saga, env);
 
     env.channel.emit({ type: 'DO', payload: 1 });
     env.channel.emit({ type: 'DO', payload: 2 });
 
     await new Promise((r) => setTimeout(r, 20));
     expect(processed).toEqual(['DO', 'DO']);
+  });
+
+  it('cancellation unsubscribes actionChannel from the event bus', async () => {
+    const env: RunnerEnv = {
+      channel: new ActionChannel(),
+      getState: () => ({}),
+    };
+
+    function* saga() {
+      const chan = yield actionChannel('EVENT');
+      // Block forever waiting for a take
+      yield take(chan);
+    }
+
+    const task = runSaga(saga, env);
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Subscription should be active
+    expect((env.channel as any).subscriptions).toHaveLength(1);
+
+    task.cancel();
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Subscription should be cleaned up after cancellation
+    expect((env.channel as any).subscriptions).toHaveLength(0);
   });
 
   it('flush drains buffered actions', async () => {
@@ -79,7 +103,7 @@ describe('actionChannel effect', () => {
       flushed = yield flush(chan);
     }
 
-    const task = runSaga(saga, env);
+    runSaga(saga, env);
 
     env.channel.emit({ type: 'EVENT', payload: 1 });
     env.channel.emit({ type: 'EVENT', payload: 2 });

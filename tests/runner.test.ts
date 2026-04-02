@@ -9,13 +9,12 @@ import {
   spawn,
   put,
   join,
-  cancel,
   cps,
   delay,
   retry,
   until,
 } from '../src/effects';
-import type { Effect, ActionEvent } from '../src/types';
+import type { ActionEvent } from '../src/types';
 
 function createEnv(state: Record<string, unknown> = {}): RunnerEnv {
   return {

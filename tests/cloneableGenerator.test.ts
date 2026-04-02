@@ -5,7 +5,7 @@ import { CALL } from '../src/types';
 import type { Effect } from '../src/types';
 
 describe('cloneableGenerator', () => {
-  function* saga(value: number): Generator<Effect, string, any> {
+  function* saga(_value: number): Generator<Effect, string, any> {
     const state = yield select();
     if (state > 0) {
       yield put({ type: 'positive' });

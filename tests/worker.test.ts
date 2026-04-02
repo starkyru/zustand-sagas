@@ -13,7 +13,6 @@ import {
   join,
   take,
   takeMaybe,
-  call,
   select,
 } from '../src/effects';
 import { END } from '../src/channels';

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { sagas, createSagaApi } from '../src';
-import type { TypedActionEvent, ActionNames, SagaApi } from '../src';
+import type { TypedActionEvent } from '../src';
 
 type StoreState = {
   count: number;
@@ -166,7 +166,7 @@ describe('DI: typed effects injected into root saga', () => {
 
 describe('createSagaApi — standalone typed API', () => {
   it('still works for sagas defined outside the middleware', async () => {
-    const { take, takeEvery } = createSagaApi<StoreState>();
+    const { takeEvery } = createSagaApi<StoreState>();
     const queries: string[] = [];
 
     function* onSearch(action: TypedActionEvent<StoreState, 'search'>) {

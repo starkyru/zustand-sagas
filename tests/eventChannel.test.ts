@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { runSaga, type RunnerEnv } from '../src/runner';
 import { ActionChannel } from '../src/channel';
-import { take, takeMaybe, call, fork, delay } from '../src/effects';
+import { take, takeMaybe, fork, delay } from '../src/effects';
 import { eventChannel, channel, END } from '../src/channels';
 
 function createEnv(): RunnerEnv {
@@ -64,7 +64,7 @@ describe('eventChannel in sagas', () => {
     }
 
     const env = createEnv();
-    const task = runSaga(saga, env);
+    runSaga(saga, env);
 
     await new Promise((r) => setTimeout(r, 50));
 
@@ -100,24 +100,6 @@ describe('eventChannel in sagas', () => {
   });
 
   it('race with channel take', async () => {
-    let result: Record<string, unknown> | undefined;
-
-    function* saga() {
-      const chan = channel<string>();
-
-      yield fork(function* () {
-        yield delay(10);
-        chan.put('hello');
-      });
-
-      result = yield call(function* () {
-        return yield {
-          type: Symbol('RACE'), // Can't use RACE directly, use race effect
-        };
-      });
-    }
-
-    // Simpler approach: test race via the race effect
     const env = createEnv();
     const { race } = await import('../src/effects');
 
@@ -137,7 +119,7 @@ describe('eventChannel in sagas', () => {
       });
     }
 
-    const task = runSaga(saga2, env);
+    runSaga(saga2, env);
     await new Promise((r) => setTimeout(r, 50));
 
     expect(raceResult).toBeDefined();

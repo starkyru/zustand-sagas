@@ -10,6 +10,28 @@ export interface WorkerPlatform {
   createFromURL(url: string | URL): WorkerHandle;
 }
 
+// --- Configuration ---
+
+export interface WorkerConfig {
+  /**
+   * Module format for generated Node.js worker code.
+   * - `'cjs'` (default): Uses `require('node:worker_threads')`. Works in CJS projects.
+   * - `'esm'`: Uses `import ... from 'node:worker_threads'`. Required when the host
+   *   project sets `"type": "module"` in package.json or otherwise runs under ESM.
+   */
+  nodeWorkerMode: 'cjs' | 'esm';
+}
+
+let workerConfig: WorkerConfig = { nodeWorkerMode: 'cjs' };
+
+/** Configure worker code generation. Call before any worker effects are used. */
+export function configureWorkers(config: Partial<WorkerConfig>): void {
+  workerConfig = { ...workerConfig, ...config };
+  // Reset cached platform so it picks up the new config
+  cachedPlatform = null;
+  pendingInit = null;
+}
+
 // --- Browser implementation ---
 
 function createBrowserPlatform(): WorkerPlatform {
@@ -53,7 +75,14 @@ function wrapBrowserWorker(worker: Worker, blobUrl: string | null): WorkerHandle
 function createNodePlatform(workerThreads: any): WorkerPlatform {
   return {
     createFromCode(code: string): WorkerHandle {
-      const worker = new workerThreads.Worker(code, { eval: true });
+      let worker;
+      if (workerConfig.nodeWorkerMode === 'esm') {
+        // ESM: data URL so Node evaluates the code as an ES module
+        const dataUrl = `data:text/javascript,${encodeURIComponent(code)}`;
+        worker = new workerThreads.Worker(new URL(dataUrl));
+      } else {
+        worker = new workerThreads.Worker(code, { eval: true });
+      }
       return wrapNodeWorker(worker);
     },
     createFromURL(url: string | URL): WorkerHandle {
@@ -145,8 +174,24 @@ self.onmessage = async (event) => {
 };
 `;
 
-const WORKER_WRAPPER_NODE = (fnString: string) => `
+const WORKER_WRAPPER_NODE_CJS = (fnString: string) => `
 const { parentPort } = require('node:worker_threads');
+const __fn = (${fnString});
+parentPort.on('message', async (msg) => {
+  if (msg.type === 'cancel') return;
+  if (msg.type === 'exec') {
+    try {
+      const result = await __fn(...msg.args);
+      parentPort.postMessage({ type: 'result', value: result });
+    } catch (e) {
+      parentPort.postMessage({ type: 'error', message: e.message, stack: e.stack });
+    }
+  }
+});
+`;
+
+const WORKER_WRAPPER_NODE_ESM = (fnString: string) => `
+import { parentPort } from 'node:worker_threads';
 const __fn = (${fnString});
 parentPort.on('message', async (msg) => {
   if (msg.type === 'cancel') return;
@@ -165,13 +210,26 @@ export type WorkerMode = 'exec' | 'channel' | 'gen';
 
 export function buildWorkerCode(fnString: string, mode: WorkerMode = 'exec'): string {
   const isNode = typeof globalThis.Worker === 'undefined';
+  const esm = isNode && workerConfig.nodeWorkerMode === 'esm';
   switch (mode) {
     case 'exec':
-      return isNode ? WORKER_WRAPPER_NODE(fnString) : WORKER_WRAPPER_BROWSER(fnString);
+      return isNode
+        ? esm
+          ? WORKER_WRAPPER_NODE_ESM(fnString)
+          : WORKER_WRAPPER_NODE_CJS(fnString)
+        : WORKER_WRAPPER_BROWSER(fnString);
     case 'channel':
-      return isNode ? WORKER_CHANNEL_NODE(fnString) : WORKER_CHANNEL_BROWSER(fnString);
+      return isNode
+        ? esm
+          ? WORKER_CHANNEL_NODE_ESM(fnString)
+          : WORKER_CHANNEL_NODE_CJS(fnString)
+        : WORKER_CHANNEL_BROWSER(fnString);
     case 'gen':
-      return isNode ? WORKER_GEN_NODE(fnString) : WORKER_GEN_BROWSER(fnString);
+      return isNode
+        ? esm
+          ? WORKER_GEN_NODE_ESM(fnString)
+          : WORKER_GEN_NODE_CJS(fnString)
+        : WORKER_GEN_BROWSER(fnString);
   }
 }
 
@@ -194,8 +252,25 @@ self.onmessage = async (event) => {
 };
 `;
 
-const WORKER_CHANNEL_NODE = (fnString: string) => `
+const WORKER_CHANNEL_NODE_CJS = (fnString: string) => `
 const { parentPort } = require('node:worker_threads');
+const __fn = (${fnString});
+const __emit = (value) => parentPort.postMessage({ type: 'emit', value });
+parentPort.on('message', async (msg) => {
+  if (msg.type === 'cancel') return;
+  if (msg.type === 'exec') {
+    try {
+      const result = await __fn(__emit, ...msg.args);
+      parentPort.postMessage({ type: 'result', value: result });
+    } catch (e) {
+      parentPort.postMessage({ type: 'error', message: e.message, stack: e.stack });
+    }
+  }
+});
+`;
+
+const WORKER_CHANNEL_NODE_ESM = (fnString: string) => `
+import { parentPort } from 'node:worker_threads';
 const __fn = (${fnString});
 const __emit = (value) => parentPort.postMessage({ type: 'emit', value });
 parentPort.on('message', async (msg) => {
@@ -241,8 +316,36 @@ self.onmessage = async (event) => {
 };
 `;
 
-const WORKER_GEN_NODE = (fnString: string) => `
+const WORKER_GEN_NODE_CJS = (fnString: string) => `
 const { parentPort } = require('node:worker_threads');
+const __fn = (${fnString});
+let __pendingResolve = null;
+const __send = (value) => new Promise((resolve) => {
+  __pendingResolve = resolve;
+  parentPort.postMessage({ type: 'send', value });
+});
+parentPort.on('message', async (msg) => {
+  if (msg.type === 'cancel') return;
+  if (msg.type === 'exec') {
+    try {
+      const result = await __fn(__send, ...msg.args);
+      parentPort.postMessage({ type: 'result', value: result });
+    } catch (e) {
+      parentPort.postMessage({ type: 'error', message: e.message, stack: e.stack });
+    }
+  }
+  if (msg.type === 'response') {
+    if (__pendingResolve) {
+      const resolve = __pendingResolve;
+      __pendingResolve = null;
+      resolve(msg.value);
+    }
+  }
+});
+`;
+
+const WORKER_GEN_NODE_ESM = (fnString: string) => `
+import { parentPort } from 'node:worker_threads';
 const __fn = (${fnString});
 let __pendingResolve = null;
 const __send = (value) => new Promise((resolve) => {

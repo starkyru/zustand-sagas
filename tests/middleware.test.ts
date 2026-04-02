@@ -10,7 +10,7 @@ describe('sagas middleware', () => {
         function* ({ take }) {
           yield take('neverCalled');
         },
-        (set) => ({
+        (_set) => ({
           count: 0,
           neverCalled: () => {},
         }),
@@ -56,7 +56,7 @@ describe('sagas middleware', () => {
           yield take('readCount');
           selectedCount = yield select((s: any) => s.count);
         },
-        (set) => ({
+        (_set) => ({
           count: 42,
           readCount: () => {},
         }),
@@ -76,7 +76,7 @@ describe('sagas middleware', () => {
           const count: number = yield select((s: any) => s.count);
           yield call(() => store.setState((s) => ({ ...s, count: count + 10 })));
         },
-        (set) => ({
+        (_set) => ({
           count: 0,
           triggerInc: () => {},
         }),
