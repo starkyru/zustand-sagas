@@ -62,6 +62,10 @@ export { ActionChannel } from './channel';
 export { runSaga } from './runner';
 export type { RunnerEnv } from './runner';
 
+// Async slice helper
+export { createAsyncSlice } from './asyncSlice';
+export type { AsyncSlice } from './asyncSlice';
+
 // Types
 export type {
   ActionEvent,
