@@ -47,7 +47,6 @@ export const SELECT: unique symbol = Symbol('SELECT');
 export const FORK: unique symbol = Symbol('FORK');
 export const SPAWN: unique symbol = Symbol('SPAWN');
 export const PUT: unique symbol = Symbol('PUT');
-export const PUT_RESOLVE: unique symbol = Symbol('PUT_RESOLVE');
 export const CANCEL: unique symbol = Symbol('CANCEL');
 export const JOIN: unique symbol = Symbol('JOIN');
 export const CPS: unique symbol = Symbol('CPS');
@@ -65,17 +64,13 @@ export const ALL: unique symbol = Symbol('ALL');
 export const ALL_SETTLED: unique symbol = Symbol('ALL_SETTLED');
 export const UNTIL: unique symbol = Symbol('UNTIL');
 
-export interface TakeEffect<Value = any> {
-  type: typeof TAKE;
-  pattern?: ActionPattern;
-  channel?: import('./channels').Channel<Value>;
-}
+export type TakeEffect<Value = any> =
+  | { type: typeof TAKE; pattern: ActionPattern; channel?: undefined }
+  | { type: typeof TAKE; pattern?: undefined; channel: import('./channels').Channel<Value> };
 
-export interface TakeMaybeEffect<Value = any> {
-  type: typeof TAKE_MAYBE;
-  pattern?: ActionPattern;
-  channel?: import('./channels').Channel<Value>;
-}
+export type TakeMaybeEffect<Value = any> =
+  | { type: typeof TAKE_MAYBE; pattern: ActionPattern; channel?: undefined }
+  | { type: typeof TAKE_MAYBE; pattern?: undefined; channel: import('./channels').Channel<Value> };
 
 export interface ActionChannelEffect {
   type: typeof ACTION_CHANNEL;
@@ -113,11 +108,6 @@ export interface SpawnEffect<Saga extends SagaFn = SagaFn> {
 
 export interface PutEffect {
   type: typeof PUT;
-  action: ActionEvent;
-}
-
-export interface PutResolveEffect {
-  type: typeof PUT_RESOLVE;
   action: ActionEvent;
 }
 
@@ -224,7 +214,6 @@ export type Effect =
   | ForkEffect
   | SpawnEffect
   | PutEffect
-  | PutResolveEffect
   | JoinEffect
   | CancelEffect
   | CpsEffect
