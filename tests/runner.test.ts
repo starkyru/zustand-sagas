@@ -1,17 +1,26 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runSaga, type RunnerEnv } from '../src/runner';
 import { ActionChannel } from '../src/channel';
-import { take, call, select, fork, spawn, cancel, delay } from '../src/effects';
-import type { Effect, ActionEvent, SagaContext } from '../src/types';
+import {
+  take,
+  call,
+  select,
+  fork,
+  spawn,
+  put,
+  putResolve,
+  join,
+  cancel,
+  cps,
+  delay,
+  retry,
+} from '../src/effects';
+import type { Effect, ActionEvent } from '../src/types';
 
 function createEnv(state: Record<string, unknown> = {}): RunnerEnv {
   return {
     channel: new ActionChannel(),
     getState: () => state,
-    context: {
-      set: (partial: unknown) => Object.assign(state, partial),
-      get: () => state,
-    },
   };
 }
 
@@ -21,7 +30,7 @@ describe('runner', () => {
       return 42;
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     const result = await task.toPromise();
     expect(result).toBe(42);
     expect(task.isRunning()).toBe(false);
@@ -29,11 +38,11 @@ describe('runner', () => {
 
   it('processes TAKE effect', async () => {
     function* saga() {
-      const action: ActionEvent = yield take('increment');
+      const action = yield take('increment');
       return action.type;
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
 
     expect(task.isRunning()).toBe(true);
     env.channel.emit({ type: 'increment' });
@@ -44,22 +53,22 @@ describe('runner', () => {
 
   it('processes CALL effect with sync function', async () => {
     function* saga() {
-      const result: number = yield call(() => 10 + 5);
+      const result = yield call(() => 10 + 5);
       return result;
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     const result = await task.toPromise();
     expect(result).toBe(15);
   });
 
   it('processes CALL effect with async function', async () => {
     function* saga() {
-      const result: string = yield call(async () => 'async-result');
+      const result = yield call(async () => 'async-result');
       return result;
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     const result = await task.toPromise();
     expect(result).toBe('async-result');
   });
@@ -69,33 +78,33 @@ describe('runner', () => {
       return 'from-sub';
     }
     function* saga() {
-      const result: string = yield call(subSaga as any);
+      const result = yield call(subSaga);
       return result;
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     const result = await task.toPromise();
     expect(result).toBe('from-sub');
   });
 
   it('processes SELECT effect', async () => {
     function* saga() {
-      const count: number = yield select((s: any) => s.count);
+      const count = yield select((s: any) => s.count);
       return count;
     }
     const env = createEnv({ count: 99 });
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     const result = await task.toPromise();
     expect(result).toBe(99);
   });
 
   it('processes SELECT without selector returns full state', async () => {
     function* saga() {
-      const state: unknown = yield select();
+      const state = yield select();
       return state;
     }
     const env = createEnv({ a: 1, b: 2 });
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     const result = await task.toPromise();
     expect(result).toEqual({ a: 1, b: 2 });
   });
@@ -107,11 +116,11 @@ describe('runner', () => {
       return 'child';
     }
     function* saga() {
-      const childTask: unknown = yield fork(childSaga as any);
+      const childTask = yield fork(childSaga);
       return childTask;
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     await task.toPromise();
     await new Promise((r) => setTimeout(r, 10));
     expect(forkedRan).toBe(true);
@@ -123,7 +132,7 @@ describe('runner', () => {
       return 'delayed';
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     const result = await task.toPromise();
     expect(result).toBe('delayed');
   });
@@ -135,7 +144,7 @@ describe('runner', () => {
       reached = true;
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     task.cancel();
 
     expect(task.isCancelled()).toBe(true);
@@ -145,24 +154,175 @@ describe('runner', () => {
   it('propagates errors via gen.throw to allow try/catch', async () => {
     function* saga() {
       try {
-        yield call(() => { throw new Error('boom'); });
+        yield call(() => {
+          throw new Error('boom');
+        });
         return 'no-error';
       } catch (e: any) {
         return `caught: ${e.message}`;
       }
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
     const result = await task.toPromise();
     expect(result).toBe('caught: boom');
   });
 
-  it('unhandled errors reject the task promise', async () => {
+  it('processes CPS effect with successful callback', async () => {
+    function readFile(path: string, cb: (err: unknown, result?: string) => void) {
+      setTimeout(() => cb(null, `content of ${path}`), 5);
+    }
     function* saga() {
-      yield call(() => { throw new Error('unhandled'); });
+      const content = yield cps(readFile, '/tmp/test.txt');
+      return content;
     }
     const env = createEnv();
-    const task = runSaga(saga as any, env);
+    const task = runSaga(saga, env);
+    const result = await task.toPromise();
+    expect(result).toBe('content of /tmp/test.txt');
+  });
+
+  it('processes CPS effect with error callback', async () => {
+    function failingOp(cb: (err: unknown, result?: unknown) => void) {
+      setTimeout(() => cb(new Error('cps-error')), 5);
+    }
+    function* saga() {
+      try {
+        yield cps(failingOp);
+        return 'no-error';
+      } catch (e: any) {
+        return `caught: ${e.message}`;
+      }
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    const result = await task.toPromise();
+    expect(result).toBe('caught: cps-error');
+  });
+
+  it('processes PUT effect and emits action to channel', async () => {
+    let received: ActionEvent | undefined;
+
+    function* listener() {
+      received = yield take('notify');
+    }
+    function* saga() {
+      yield fork(listener);
+      yield delay(5);
+      yield put({ type: 'notify', payload: 'hello' });
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    await task.toPromise();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(received).toEqual({ type: 'notify', payload: 'hello' });
+  });
+
+  it('PUT returns the dispatched action', async () => {
+    function* saga() {
+      const result = yield put({ type: 'test' });
+      return result;
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    const result = await task.toPromise();
+    expect(result).toEqual({ type: 'test' });
+  });
+
+  it('processes PUT_RESOLVE effect (blocking put)', async () => {
+    let received: ActionEvent | undefined;
+
+    function* listener() {
+      received = yield take('ping');
+    }
+    function* saga() {
+      yield fork(listener);
+      yield delay(5);
+      const result = yield putResolve({ type: 'ping', payload: 42 });
+      return result;
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    const result = await task.toPromise();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(received).toEqual({ type: 'ping', payload: 42 });
+    expect(result).toEqual({ type: 'ping', payload: 42 });
+  });
+
+  it('processes JOIN effect — waits for forked task result', async () => {
+    function* child() {
+      yield delay(20);
+      return 'child-done';
+    }
+    function* saga() {
+      const childTask = yield fork(child);
+      const result = yield join(childTask);
+      return result;
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    const result = await task.toPromise();
+    expect(result).toBe('child-done');
+  });
+
+  it('JOIN propagates errors from the joined task', async () => {
+    function* child() {
+      yield delay(5);
+      throw new Error('child-failed');
+    }
+    function* saga() {
+      const childTask = yield fork(child);
+      try {
+        yield join(childTask);
+        return 'no-error';
+      } catch (e: any) {
+        return `caught: ${e.message}`;
+      }
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    const result = await task.toPromise();
+    expect(result).toBe('caught: child-failed');
+  });
+
+  it('processes RETRY effect — retries on failure then succeeds', async () => {
+    let attempts = 0;
+    function unstable() {
+      attempts++;
+      if (attempts < 3) throw new Error('fail');
+      return 'ok';
+    }
+    function* saga() {
+      const result = yield retry(5, 10, unstable);
+      return result;
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    const result = await task.toPromise();
+    expect(result).toBe('ok');
+    expect(attempts).toBe(3);
+  });
+
+  it('processes RETRY effect — exhausts retries and throws', async () => {
+    function alwaysFails() {
+      throw new Error('permanent');
+    }
+    function* saga() {
+      yield retry(3, 5, alwaysFails);
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    await expect(task.toPromise()).rejects.toThrow('permanent');
+  });
+
+  it('unhandled errors reject the task promise', async () => {
+    function* saga() {
+      yield call(() => {
+        throw new Error('unhandled');
+      });
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
     await expect(task.toPromise()).rejects.toThrow('unhandled');
   });
 });

@@ -34,22 +34,33 @@ describe('effect creators', () => {
   });
 
   it('fork creates a ForkEffect', () => {
-    function* mySaga() { yield take('doSomething'); }
-    const effect = fork(mySaga as any);
+    function* mySaga() {
+      yield take('doSomething');
+    }
+    const effect = fork(mySaga);
     expect(effect.type).toBe(FORK);
     expect(effect.saga).toBe(mySaga);
     expect(effect.args).toEqual([]);
   });
 
   it('spawn creates a SpawnEffect', () => {
-    function* mySaga() { yield take('doSomething'); }
-    const effect = spawn(mySaga as any);
+    function* mySaga() {
+      yield take('doSomething');
+    }
+    const effect = spawn(mySaga);
     expect(effect.type).toBe(SPAWN);
     expect(effect.saga).toBe(mySaga);
   });
 
   it('cancel creates a CancelEffect', () => {
-    const task = { id: 1, isRunning: () => true, isCancelled: () => false, result: () => undefined, toPromise: () => Promise.resolve(), cancel: () => {} };
+    const task = {
+      id: 1,
+      isRunning: () => true,
+      isCancelled: () => false,
+      result: () => undefined,
+      toPromise: () => Promise.resolve(),
+      cancel: () => {},
+    };
     const effect = cancel(task);
     expect(effect).toEqual({ type: CANCEL, task });
   });

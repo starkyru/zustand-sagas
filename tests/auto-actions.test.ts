@@ -8,12 +8,15 @@ describe('auto-actions: store functions emit actions on the saga channel', () =>
     let received: ActionEvent | undefined;
 
     const store = createStore(
-      sagas(function* ({ take }) {
-        received = yield take('increment');
-      }, (set) => ({
-        count: 0,
-        increment: () => set((s) => ({ ...s, count: s.count + 1 })),
-      })),
+      sagas(
+        function* ({ take }) {
+          received = yield take('increment');
+        },
+        (set) => ({
+          count: 0,
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+        }),
+      ),
     );
 
     store.getState().increment();
@@ -30,13 +33,15 @@ describe('auto-actions: store functions emit actions on the saga channel', () =>
     let received: ActionEvent | undefined;
 
     const store = createStore(
-      sagas(function* ({ take }) {
-        received = yield take('addTodo');
-      }, (set) => ({
-        todos: [] as string[],
-        addTodo: (text: string) =>
-          set((s) => ({ ...s, todos: [...s.todos, text] })),
-      })),
+      sagas(
+        function* ({ take }) {
+          received = yield take('addTodo');
+        },
+        (set) => ({
+          todos: [] as string[],
+          addTodo: (text: string) => set((s) => ({ ...s, todos: [...s.todos, text] })),
+        }),
+      ),
     );
 
     store.getState().addTodo('buy milk');
@@ -54,13 +59,16 @@ describe('auto-actions: store functions emit actions on the saga channel', () =>
     let received: ActionEvent | undefined;
 
     const store = createStore(
-      sagas(function* ({ take }) {
-        received = yield take('setPosition');
-      }, (set) => ({
-        x: 0,
-        y: 0,
-        setPosition: (x: number, y: number) => set({ x, y }),
-      })),
+      sagas(
+        function* ({ take }) {
+          received = yield take('setPosition');
+        },
+        (set) => ({
+          x: 0,
+          y: 0,
+          setPosition: (x: number, y: number) => set({ x, y }),
+        }),
+      ),
     );
 
     store.getState().setPosition(10, 20);
@@ -75,12 +83,15 @@ describe('auto-actions: store functions emit actions on the saga channel', () =>
     let received: ActionEvent | undefined;
 
     const store = createStore(
-      sagas(function* ({ take }) {
-        received = yield take('reset');
-      }, (set) => ({
-        count: 5,
-        reset: () => set({ count: 0 }),
-      })),
+      sagas(
+        function* ({ take }) {
+          received = yield take('reset');
+        },
+        (set) => ({
+          count: 5,
+          reset: () => set({ count: 0 }),
+        }),
+      ),
     );
 
     store.getState().reset();
@@ -96,15 +107,18 @@ describe('auto-actions: store functions emit actions on the saga channel', () =>
     const log: number[] = [];
 
     const store = createStore(
-      sagas(function* ({ takeEvery, select }) {
-        yield* takeEvery('increment', function* () {
-          const count: number = yield select((s: any) => s.count);
-          log.push(count);
-        });
-      }, (set) => ({
-        count: 0,
-        increment: () => set((s) => ({ ...s, count: s.count + 1 })),
-      })),
+      sagas(
+        function* ({ takeEvery, select }) {
+          yield takeEvery('increment', function* () {
+            const count: number = yield select((s: any) => s.count);
+            log.push(count);
+          });
+        },
+        (set) => ({
+          count: 0,
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+        }),
+      ),
     );
 
     store.getState().increment();
@@ -120,19 +134,20 @@ describe('auto-actions: store functions emit actions on the saga channel', () =>
 
   it('saga can react to action and perform async side effect', async () => {
     const store = createStore(
-      sagas(function* ({ takeEvery, delay, call }) {
-        yield* takeEvery('search', function* (action) {
-          yield delay(10);
-          const query = action.payload as string;
-          yield call(() =>
-            store.setState((s) => ({ ...s, results: [`result for ${query}`] })),
-          );
-        });
-      }, (set) => ({
-        query: '',
-        results: [] as string[],
-        search: (q: string) => set((s) => ({ ...s, query: q })),
-      })),
+      sagas(
+        function* ({ takeEvery, delay, call }) {
+          yield takeEvery('search', function* (action) {
+            yield delay(10);
+            const query = action.payload as string;
+            yield call(() => store.setState((s) => ({ ...s, results: [`result for ${query}`] })));
+          });
+        },
+        (set) => ({
+          query: '',
+          results: [] as string[],
+          search: (q: string) => set((s) => ({ ...s, query: q })),
+        }),
+      ),
     );
 
     store.getState().search('zustand');
@@ -148,13 +163,15 @@ describe('auto-actions: store functions emit actions on the saga channel', () =>
     let received: ActionEvent | undefined;
 
     const store = createStore(
-      sagas(function* ({ take }) {
-        received = yield take((action: ActionEvent) => action.type.startsWith('add'));
-      }, (set) => ({
-        items: [] as string[],
-        addItem: (item: string) =>
-          set((s) => ({ ...s, items: [...s.items, item] })),
-      })),
+      sagas(
+        function* ({ take }) {
+          received = yield take((action: ActionEvent) => action.type.startsWith('add'));
+        },
+        (set) => ({
+          items: [] as string[],
+          addItem: (item: string) => set((s) => ({ ...s, items: [...s.items, item] })),
+        }),
+      ),
     );
 
     store.getState().addItem('test');

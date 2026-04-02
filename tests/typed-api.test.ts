@@ -33,15 +33,18 @@ describe('DI: typed effects injected into root saga', () => {
     let received: TypedActionEvent<StoreState, 'increment'> | undefined;
 
     const store = createStore(
-      sagas(function* ({ take }) {
-        received = yield take('increment');
-      }, (set) => ({
-        count: 0,
-        query: '',
-        increment: () => set((s) => ({ ...s, count: s.count + 1 })),
-        search: (q: string) => set((s) => ({ ...s, query: q })),
-        setPosition: (x: number, y: number) => set({ x, y } as any),
-      })),
+      sagas(
+        function* ({ take }) {
+          received = yield take('increment');
+        },
+        (set) => ({
+          count: 0,
+          query: '',
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+          search: (q: string) => set((s) => ({ ...s, query: q })),
+          setPosition: (x: number, y: number) => set({ x, y } as any),
+        }),
+      ),
     );
 
     store.getState().increment();
@@ -55,17 +58,20 @@ describe('DI: typed effects injected into root saga', () => {
     const queries: string[] = [];
 
     const store = createStore(
-      sagas(function* ({ takeEvery }) {
-        yield* takeEvery('search', function* (action) {
-          queries.push(action.payload);
-        });
-      }, (set) => ({
-        count: 0,
-        query: '',
-        increment: () => set((s) => ({ ...s, count: s.count + 1 })),
-        search: (q: string) => set((s) => ({ ...s, query: q })),
-        setPosition: (x: number, y: number) => set({ x, y } as any),
-      })),
+      sagas(
+        function* ({ takeEvery }) {
+          yield takeEvery('search', function* (action) {
+            queries.push(action.payload);
+          });
+        },
+        (set) => ({
+          count: 0,
+          query: '',
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+          search: (q: string) => set((s) => ({ ...s, query: q })),
+          setPosition: (x: number, y: number) => set({ x, y } as any),
+        }),
+      ),
     );
 
     store.getState().search('hello');
@@ -81,18 +87,21 @@ describe('DI: typed effects injected into root saga', () => {
     const results: string[] = [];
 
     const store = createStore(
-      sagas(function* ({ takeLatest, delay }) {
-        yield* takeLatest('search', function* (action) {
-          yield delay(50);
-          results.push(action.payload);
-        });
-      }, (set) => ({
-        count: 0,
-        query: '',
-        increment: () => set((s) => ({ ...s, count: s.count + 1 })),
-        search: (q: string) => set((s) => ({ ...s, query: q })),
-        setPosition: (x: number, y: number) => set({ x, y } as any),
-      })),
+      sagas(
+        function* ({ takeLatest, delay }) {
+          yield takeLatest('search', function* (action) {
+            yield delay(50);
+            results.push(action.payload);
+          });
+        },
+        (set) => ({
+          count: 0,
+          query: '',
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+          search: (q: string) => set((s) => ({ ...s, query: q })),
+          setPosition: (x: number, y: number) => set({ x, y } as any),
+        }),
+      ),
     );
 
     store.getState().search('first');
@@ -108,15 +117,18 @@ describe('DI: typed effects injected into root saga', () => {
     let received: TypedActionEvent<StoreState, 'setPosition'> | undefined;
 
     const store = createStore(
-      sagas(function* ({ take }) {
-        received = yield take('setPosition');
-      }, (set) => ({
-        count: 0,
-        query: '',
-        increment: () => set((s) => ({ ...s, count: s.count + 1 })),
-        search: (q: string) => set((s) => ({ ...s, query: q })),
-        setPosition: (x: number, y: number) => set({ x, y } as any),
-      })),
+      sagas(
+        function* ({ take }) {
+          received = yield take('setPosition');
+        },
+        (set) => ({
+          count: 0,
+          query: '',
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+          search: (q: string) => set((s) => ({ ...s, query: q })),
+          setPosition: (x: number, y: number) => set({ x, y } as any),
+        }),
+      ),
     );
 
     store.getState().setPosition(10, 20);
@@ -130,15 +142,18 @@ describe('DI: typed effects injected into root saga', () => {
     let received: any;
 
     const store = createStore(
-      sagas(function* ({ take }) {
-        received = yield take((a) => a.type.startsWith('inc'));
-      }, (set) => ({
-        count: 0,
-        query: '',
-        increment: () => set((s) => ({ ...s, count: s.count + 1 })),
-        search: (q: string) => set((s) => ({ ...s, query: q })),
-        setPosition: (x: number, y: number) => set({ x, y } as any),
-      })),
+      sagas(
+        function* ({ take }) {
+          received = yield take((a) => a.type.startsWith('inc'));
+        },
+        (set) => ({
+          count: 0,
+          query: '',
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+          search: (q: string) => set((s) => ({ ...s, query: q })),
+          setPosition: (x: number, y: number) => set({ x, y } as any),
+        }),
+      ),
     );
 
     store.getState().increment();
@@ -159,15 +174,18 @@ describe('createSagaApi — standalone typed API', () => {
     }
 
     const store = createStore(
-      sagas(function* () {
-        yield* takeEvery('search', onSearch);
-      }, (set) => ({
-        count: 0,
-        query: '',
-        increment: () => set((s) => ({ ...s, count: s.count + 1 })),
-        search: (q: string) => set((s) => ({ ...s, query: q })),
-        setPosition: (x: number, y: number) => set({ x, y } as any),
-      })),
+      sagas(
+        function* () {
+          yield takeEvery('search', onSearch);
+        },
+        (set) => ({
+          count: 0,
+          query: '',
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+          search: (q: string) => set((s) => ({ ...s, query: q })),
+          setPosition: (x: number, y: number) => set({ x, y } as any),
+        }),
+      ),
     );
 
     store.getState().search('test');

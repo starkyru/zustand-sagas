@@ -6,16 +6,19 @@ import type { ActionEvent } from '../src/types';
 describe('integration', () => {
   it('async counter: action → saga delays → state updates', async () => {
     const store = createStore(
-      sagas(function* ({ takeEvery, delay, select, call }) {
-        yield* takeEvery('incrementAsync', function* () {
-          yield delay(30);
-          const count: number = yield select((s: any) => s.count);
-          yield call(() => store.setState((s) => ({ ...s, count: count + 1 })));
-        });
-      }, (set) => ({
-        count: 0,
-        incrementAsync: () => {},
-      })),
+      sagas(
+        function* ({ takeEvery, delay, select, call }) {
+          yield takeEvery('incrementAsync', function* () {
+            yield delay(30);
+            const count: number = yield select((s: any) => s.count);
+            yield call(() => store.setState((s) => ({ ...s, count: count + 1 })));
+          });
+        },
+        (set) => ({
+          count: 0,
+          incrementAsync: () => {},
+        }),
+      ),
     );
 
     store.getState().incrementAsync();
@@ -32,14 +35,17 @@ describe('integration', () => {
     let result: Record<string, unknown> | undefined;
 
     const store = createStore(
-      sagas(function* ({ take, race, delay }) {
-        result = yield race({
-          action: take('slowAction'),
-          timeout: delay(30),
-        });
-      }, (set) => ({
-        slowAction: () => {},
-      })),
+      sagas(
+        function* ({ take, race, delay }) {
+          result = yield race({
+            action: take('slowAction'),
+            timeout: delay(30),
+          });
+        },
+        (set) => ({
+          slowAction: () => {},
+        }),
+      ),
     );
 
     // Don't call slowAction — timeout should win
@@ -55,14 +61,17 @@ describe('integration', () => {
     let result: Record<string, unknown> | undefined;
 
     const store = createStore(
-      sagas(function* ({ take, race, delay }) {
-        result = yield race({
-          action: take('fastAction'),
-          timeout: delay(500),
-        });
-      }, (set) => ({
-        fastAction: () => {},
-      })),
+      sagas(
+        function* ({ take, race, delay }) {
+          result = yield race({
+            action: take('fastAction'),
+            timeout: delay(500),
+          });
+        },
+        (set) => ({
+          fastAction: () => {},
+        }),
+      ),
     );
 
     store.getState().fastAction();
@@ -77,23 +86,26 @@ describe('integration', () => {
     const log: string[] = [];
 
     const store = createStore(
-      sagas(function* ({ take, fork, delay, call }) {
-        function* producer() {
-          yield delay(10);
-          yield call(() => store.getState().dataReady('hello'));
-        }
+      sagas(
+        function* ({ take, fork, delay, call }) {
+          function* producer() {
+            yield delay(10);
+            yield call(() => store.getState().dataReady('hello'));
+          }
 
-        function* consumer() {
-          const action: ActionEvent = yield take('dataReady');
-          log.push(`received: ${action.payload}`);
-        }
+          function* consumer() {
+            const action: ActionEvent = yield take('dataReady');
+            log.push(`received: ${action.payload}`);
+          }
 
-        yield fork(consumer as any);
-        yield fork(producer as any);
-      }, (set) => ({
-        data: null as string | null,
-        dataReady: (value: string) => set((s) => ({ ...s, data: value })),
-      })),
+          yield fork(consumer);
+          yield fork(producer);
+        },
+        (set) => ({
+          data: null as string | null,
+          dataReady: (value: string) => set((s) => ({ ...s, data: value })),
+        }),
+      ),
     );
 
     await new Promise((r) => setTimeout(r, 50));
@@ -105,20 +117,23 @@ describe('integration', () => {
     const log: string[] = [];
 
     const store = createStore(
-      sagas(function* ({ fork, delay }) {
-        function* child2() {
-          log.push('child2');
-        }
+      sagas(
+        function* ({ fork, delay }) {
+          function* child2() {
+            log.push('child2');
+          }
 
-        function* child1() {
-          log.push('child1-start');
-          yield fork(child2 as any);
-          log.push('child1-end');
-        }
+          function* child1() {
+            log.push('child1-start');
+            yield fork(child2);
+            log.push('child1-end');
+          }
 
-        yield fork(child1 as any);
-        yield delay(20);
-      }, () => ({})),
+          yield fork(child1);
+          yield delay(20);
+        },
+        () => ({}),
+      ),
     );
 
     await new Promise((r) => setTimeout(r, 50));
@@ -131,17 +146,16 @@ describe('integration', () => {
     let result: unknown;
 
     const store = createStore(
-      sagas(function* ({ take, delay, select, all }) {
-        yield take('go');
-        result = yield all([
-          delay(10),
-          delay(20),
-          select((s: any) => s.value),
-        ]);
-      }, (set) => ({
-        value: 'test',
-        go: () => {},
-      })),
+      sagas(
+        function* ({ take, delay, select, all }) {
+          yield take('go');
+          result = yield all([delay(10), delay(20), select((s: any) => s.value)]);
+        },
+        (set) => ({
+          value: 'test',
+          go: () => {},
+        }),
+      ),
     );
 
     store.getState().go();
@@ -152,19 +166,22 @@ describe('integration', () => {
 
   it('error handling in saga with try/catch', async () => {
     const store = createStore(
-      sagas(function* ({ call }) {
-        function* failingWorker() {
-          throw new Error('oops');
-        }
+      sagas(
+        function* ({ call }) {
+          function* failingWorker() {
+            throw new Error('oops');
+          }
 
-        try {
-          yield call(failingWorker as any);
-        } catch (e: any) {
-          yield call(() => store.setState((s) => ({ ...s, error: e.message })));
-        }
-      }, (set) => ({
-        error: null as string | null,
-      })),
+          try {
+            yield call(failingWorker);
+          } catch (e: any) {
+            yield call(() => store.setState((s) => ({ ...s, error: e.message })));
+          }
+        },
+        (set) => ({
+          error: null as string | null,
+        }),
+      ),
     );
 
     await new Promise((r) => setTimeout(r, 20));

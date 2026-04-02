@@ -2,14 +2,11 @@ import type { Task } from './types';
 
 let nextTaskId = 0;
 
-export function createTask<R>(
-  promise: Promise<R>,
-  onCancel: () => void,
-): Task<R> {
+export function createTask<Result>(promise: Promise<Result>, onCancel: () => void): Task<Result> {
   const id = nextTaskId++;
   let running = true;
   let cancelled = false;
-  let taskResult: R | undefined = undefined;
+  let taskResult: Result | undefined = undefined;
 
   const settled = promise.then(
     (value) => {

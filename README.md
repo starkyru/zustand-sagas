@@ -11,26 +11,23 @@ npm install zustand-sagas zustand
 ## Quick Start
 
 ```ts
-import { create } from 'zustand';
-import { sagas } from 'zustand-sagas';
+import { createStore } from 'zustand/vanilla';
+import { createSaga } from 'zustand-sagas';
 
-const store = create(
-  sagas(
-    // Root saga receives typed effects — typos in action names are TS errors
-    function* ({ takeEvery, delay, select, call }) {
-      yield* takeEvery('incrementAsync', function* () {
-        yield delay(1000);
-        const count = yield select((s) => s.count);
-        yield call(() => store.setState({ count: count + 1 }));
-      });
-    },
-    // Store state — actions are normal Zustand functions
-    (set) => ({
-      count: 0,
-      incrementAsync: () => {},
-    }),
-  ),
-);
+// Create store — actions are normal Zustand functions
+const store = createStore((set) => ({
+  count: 0,
+  incrementAsync: () => {},
+}));
+
+// Attach sagas — root saga receives typed effects
+const useSaga = createSaga(store, function* ({ takeEvery, delay, select, call }) {
+  yield takeEvery('incrementAsync', function* () {
+    yield delay(1000);
+    const count = yield select((s) => s.count);
+    yield call(() => store.setState({ count: count + 1 }));
+  });
+});
 
 // Just call the action — the saga picks it up automatically
 store.getState().incrementAsync();
@@ -40,7 +37,7 @@ No `dispatch()`, no `{ type: 'ACTION' }` objects. Store function names **are** t
 
 ## How It Works
 
-The `sagas` middleware wraps every function in your store state. When you call a store action like `increment(arg)`, two things happen:
+`createSaga` wraps every function in your store state. When you call a store action like `increment(arg)`, two things happen:
 
 1. An `ActionEvent` (`{ type: 'increment', payload: arg }`) is emitted on an internal channel
 2. The original function runs normally (state updates happen as usual)
@@ -49,39 +46,89 @@ Sagas are generator functions that yield declarative effect descriptions. The ru
 
 ```
 store.getState().increment(5)
-        │
-        ├──> emit { type: 'increment', payload: 5 }
-        │         │
-        │         └──> ActionChannel ──> take('increment') resolves ──> saga resumes
-        │
-        └──> original increment(5) runs ──> state updates via set()
+        |
+        |---> emit { type: 'increment', payload: 5 }
+        |         |
+        |         '---> ActionChannel ---> take('increment') resolves ---> saga resumes
+        |
+        '---> original increment(5) runs ---> state updates via set()
 ```
 
 **Key design decisions:**
+
 - Actions are store functions — no string constants, no action creators
 - State mutations happen directly in store actions, not through sagas
 - Sagas observe and react to actions for side effects (API calls, async flows, coordination)
-- Saga-to-saga communication goes through store actions via `call()`
+- Saga-to-saga communication goes through `put()` which emits to the channel
 - Cancellation is cooperative — checked after each yielded effect
-- No buffered channels — unmatched actions are dropped
+- Channels support buffering, multicast, and external event sources
 
 ### Payload convention
 
-|      Call             |       `payload`      |
+| Call                  | `payload`            |
 |-----------------------|----------------------|
 | `increment()`         | `undefined`          |
 | `addTodo('buy milk')` | `'buy milk'`         |
-| `setPosition(10, 20)` |  `[10, 20]`          |
+| `setPosition(10, 20)` | `[10, 20]`          |
 
 ## API Reference
 
-### Middleware
+### `createSaga(store, rootSaga)`
 
-#### `sagas(rootSaga, stateCreator)`
+Attaches sagas to an existing Zustand store. Returns a `useSaga` function for accessing typed effects in child sagas.
 
-Zustand middleware that starts the root saga when the store is created. Adds `sagaTask` to the store API.
+```ts
+import { createStore } from 'zustand/vanilla';
+import { createSaga } from 'zustand-sagas';
 
-The root saga receives a typed `SagaApi<T>` object as its first argument — all effects are injected automatically, constrained to your store's action names. Typos and non-function keys are compile-time errors.
+const store = createStore((set) => ({
+  count: 0,
+  increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+  search: (q: string) => set((s) => ({ ...s, query: q })),
+}));
+
+const useSaga = createSaga(store, function* ({ takeEvery, take, call }) {
+  // take('typo')  -> TS error!
+  // take('count') -> TS error! (not a function)
+  yield takeEvery('increment', function* (action) {
+    // action.payload is typed from increment's parameters
+  });
+});
+
+// Cancel all sagas
+useSaga.task.cancel();
+```
+
+Child sagas use the injected api from the root saga's closure:
+
+```ts
+const useSaga = createSaga(store, function* ({ take, fork }) {
+  function* watchIncrement() {
+    while (true) {
+      yield take('increment');  // typed — uses parent's take
+      // ...
+    }
+  }
+  yield fork(watchIncrement);
+});
+```
+
+For worker sagas in **separate files** (triggered by actions, not immediately during `createSaga`), call `useSaga()` to access the typed effects:
+
+```ts
+// workers.ts
+import { useSaga } from './store';
+
+export function* onSearch() {
+  const { select, call } = useSaga();
+  const query = yield select((s) => s.query);
+  yield call(fetchResults, query);
+}
+```
+
+### `sagas(rootSaga, stateCreator)` (middleware)
+
+Alternative to `createSaga` — bakes sagas into the store creation. Adds `sagaTask` to the store API.
 
 ```ts
 import { create } from 'zustand';
@@ -89,12 +136,8 @@ import { sagas } from 'zustand-sagas';
 
 const useStore = create(
   sagas(
-    function* ({ take, takeEvery, call, select, delay }) {
-      // take('typo')  → TS error!
-      // take('count') → TS error! (not a function)
-      yield* takeEvery('increment', function* (action) {
-        // action.payload is typed from increment's parameters
-      });
+    function* ({ takeEvery }) {
+      yield takeEvery('increment', function* () { /* ... */ });
     },
     (set) => ({
       count: 0,
@@ -103,102 +146,148 @@ const useStore = create(
   ),
 );
 
-// Access the root saga task
-useStore.sagaTask.cancel(); // stop all sagas
+useStore.sagaTask.cancel();
 ```
-
-### `createSagaApi<StoreState>()`
-
-For sagas defined **outside** the middleware call (separate files, shared workers), use `createSagaApi` to get a standalone typed API:
-
-```ts
-import { createSagaApi } from 'zustand-sagas';
-import type { TypedActionEvent } from 'zustand-sagas';
-
-type State = {
-  count: number;
-  increment: () => void;
-  search: (q: string) => void;
-};
-
-const { take, takeEvery } = createSagaApi<State>();
-
-function* onSearch(action: TypedActionEvent<State, 'search'>) {
-  action.payload // typed as string (from search's parameter)
-}
-
-// Use in a root saga that ignores the injected api
-function* rootSaga() {
-  yield* takeEvery('search', onSearch);
-}
-```
-
-At runtime, these are identical to the injected versions — `createSagaApi` is purely a type-level wrapper.
 
 ### Effects
 
-Effects are plain objects that describe side effects. Yield them from generator functions and the runner executes them.
+Effects describe side effects declaratively. Yield them from generator functions and the runner executes them.
 
-#### `take(pattern)`
+#### `take(pattern)` / `take(channel)`
 
-Pauses the saga until a store action matching `pattern` is called.
+Pauses the saga until a matching action is called or a message arrives on a channel.
 
-- `pattern: string` — matches the action's function name
+- `pattern: string` — matches the store function name exactly
 - `pattern: (action) => boolean` — matches when predicate returns `true`
+- `channel: Channel<Item>` — takes the next message from the channel; auto-terminates the saga on `END`
 
 ```ts
-function* saga() {
-  // Wait for the login action to be called
+function* rootSaga({ take }) {
+  // Wait for a store action
   const action = yield take('login');
-  console.log(action.payload); // the argument passed to login()
+  console.log(action.payload);
 
   // Wait for any action matching a predicate
   const action2 = yield take((a) => a.type.startsWith('fetch'));
 }
 ```
 
-> **Note:** When used via the injected `SagaApi`, `take` only accepts valid action names from your store.
+```ts
+// Take from a channel
+function* saga({ take }) {
+  const chan = eventChannel((emit) => {
+    const ws = new WebSocket(url);
+    ws.onmessage = (e) => emit(JSON.parse(e.data));
+    ws.onclose = () => emit(END);
+    return () => ws.close();
+  });
+
+  while (true) {
+    const msg = yield take(chan); // auto-terminates on END
+    yield call(() => store.setState({ lastMessage: msg }));
+  }
+}
+```
+
+When used via the injected `SagaApi`, `take` only accepts valid action names from your store (string literals). The predicate and channel overloads still accept any value.
+
+#### `takeMaybe(pattern)` / `takeMaybe(channel)`
+
+Like `take`, but does **not** auto-terminate the saga when `END` is received from a channel. Instead, `END` is returned as a normal value so the saga can handle it manually.
+
+```ts
+function* saga({ takeMaybe }) {
+  const chan = eventChannel(subscribe);
+
+  while (true) {
+    const msg = yield takeMaybe(chan);
+    if (msg === END) {
+      console.log('channel closed');
+      break;
+    }
+    // process msg
+  }
+}
+```
+
+#### `put(actionName, ...args)`
+
+Emits an action into the saga channel. Other sagas listening via `take` will receive it. Arguments match the store function's parameters — like calling the action directly, but only through the saga channel.
+
+```ts
+function* saga({ put }) {
+  yield put('increment');                  // () => void
+  yield put('search', 'query');            // (q: string) => void
+  yield put('setPosition', 10, 20);        // (x: number, y: number) => void
+}
+```
+
+Via the typed `SagaApi`, only valid store function names are accepted — `put('typo')` is a type error.
+
+#### `putApply(actionName, args)`
+
+Like `put`, but takes arguments as an array (similar to `Function.prototype.apply`).
+
+```ts
+function* saga({ putApply }) {
+  const coords = [10, 20];
+  yield putApply('setPosition', coords);   // (x: number, y: number) => void
+}
+```
+
+#### `putResolve(actionName, ...args)` / `putResolveApply(actionName, args)`
+
+Blocking variants of `put`/`putApply`. Same signature and behavior, explicitly blocking — the saga waits for the effect to complete before continuing.
+
+```ts
+function* saga({ putResolve }) {
+  yield putResolve('dataReady', result);
+}
+```
 
 #### `call(fn, ...args)`
 
-Calls a function and waits for its result. If `fn` returns a generator, it is run as a sub-saga. If it returns a promise, the saga waits for resolution.
+Calls a function and waits for its result. If `fn` returns a generator, it is run as a sub-saga. If it returns a promise, the saga waits for resolution. Arguments are type-checked against the function signature.
 
 ```ts
-function* saga() {
-  // Call a sync function
+function* saga({ call }) {
   const sum = yield call((a, b) => a + b, 1, 2);
-
-  // Call an async function
   const data = yield call(fetchUser, userId);
-
-  // Call a sub-saga (generator)
   yield call(otherSaga);
-
-  // Mutate store state from a saga
   yield call(() => store.setState({ count: sum }));
+}
+```
+
+#### `cps(fn, ...args)`
+
+Like `call`, but for Node.js-style callback functions `(error, result) => void`. Wraps the callback in a promise.
+
+```ts
+function* saga({ cps }) {
+  const content = yield cps(fs.readFile, '/path/to/file', 'utf8');
 }
 ```
 
 #### `select(selector?)`
 
-Reads the current store state. If a selector is provided, returns its result. Otherwise returns the full state.
+Reads the current store state. If a selector is provided, returns its result. Otherwise returns the full state. The selector parameter is typed to your store state via `SagaApi`.
 
 ```ts
-function* saga() {
-  const count = yield select((s) => s.count);
+function* saga({ select }) {
+  const count = yield select((s) => s.count);  // s is typed
   const fullState = yield select();
 }
 ```
 
 #### `fork(saga, ...args)`
 
-Starts a new saga as an **attached** (child) task. The parent continues immediately without waiting.
+Starts a new saga as an **attached** (child) task. The parent continues immediately without waiting. Returns a `Task`. Saga arguments are type-checked.
 
 - Parent cancellation cascades to forked children
 - Child errors propagate to the parent
 
 ```ts
-function* rootSaga() {
+function* rootSaga({ fork }) {
   const task = yield fork(backgroundWorker);
   // continues immediately
 }
@@ -206,14 +295,181 @@ function* rootSaga() {
 
 #### `spawn(saga, ...args)`
 
-Starts a new saga as a **detached** task. Independent lifecycle.
+Starts a new saga as a **detached** task. Independent lifecycle. Returns a `Task`. Saga arguments are type-checked.
 
 - Parent cancellation does **not** affect spawned tasks
 - Errors do **not** propagate to the parent
 
 ```ts
-function* rootSaga() {
-  yield spawn(independentLogger);
+function* rootSaga({ spawn }) {
+  const task = yield spawn(independentLogger);
+}
+```
+
+#### `callWorker(fn | url, ...args)`
+
+Runs a function in a **Web Worker** (browser) or **worker thread** (Node.js) and waits for the result. Blocking — the saga pauses until the worker completes.
+
+The first argument is either:
+- A **function** (sync or async) — serialized and executed in a fresh worker
+- A **string URL/path** — worker created from that file
+
+```ts
+function* saga({ callWorker }) {
+  // Inline function — offload CPU-heavy work
+  const hash = yield callWorker((data: string) => {
+    let h = 0;
+    for (let i = 0; i < data.length; i++) {
+      h = (h << 5) - h + data.charCodeAt(i);
+    }
+    return h;
+  }, hugeString);
+
+  // Async function in worker
+  const data = yield callWorker(async (url: string) => {
+    const res = await fetch(url);
+    return res.json();
+  }, '/api/heavy-data');
+
+  // From a worker file
+  const result = yield callWorker('./workers/process.js', payload);
+}
+```
+
+**Important:** Inline functions must be **self-contained** — no closures over external variables, no imports. Arguments and results must be structured-cloneable (no functions, DOM nodes, class instances).
+
+#### `forkWorker(fn | url, ...args)`
+
+Like `callWorker`, but **non-blocking** and **attached**. Returns a `Task` immediately. The worker runs in the background. Parent cancellation cascades to the worker.
+
+```ts
+function* saga({ forkWorker, join, cancel }) {
+  const task = yield forkWorker((data: number[]) => {
+    return data.reduce((a, b) => a + b, 0);
+  }, largeArray);
+
+  // Do other work while worker runs...
+  yield delay(100);
+
+  // Wait for worker result
+  const sum = yield join(task);
+
+  // Or cancel it
+  yield cancel(task);  // sends cancel signal, then terminates
+}
+```
+
+#### `spawnWorker(fn | url, ...args)`
+
+Like `forkWorker`, but **detached**. Parent cancellation does **not** affect the worker. Errors do **not** propagate to the parent.
+
+```ts
+function* saga({ spawnWorker }) {
+  yield spawnWorker(async (metrics: object) => {
+    await fetch('/api/analytics', {
+      method: 'POST',
+      body: JSON.stringify(metrics),
+    });
+  }, analyticsData);
+  // saga continues, worker runs independently
+}
+```
+
+#### `forkWorkerChannel(fn, ...args)` — streaming
+
+Runs a function in a worker that can **stream values back** to the saga through a channel. The worker function receives an `emit` callback as its first argument. Returns `{ channel, task }`.
+
+```ts
+function* saga({ forkWorkerChannel, takeMaybe, join }) {
+  const { channel: chan, task } = yield forkWorkerChannel(
+    (emit, data: number[]) => {
+      for (let i = 0; i < data.length; i++) {
+        emit({ progress: (i + 1) / data.length, item: data[i] });
+      }
+      return 'done';
+    },
+    largeDataset,
+  );
+
+  // Consume streamed values (use takeMaybe to handle END manually)
+  while (true) {
+    const msg = yield takeMaybe(chan);
+    if (msg === END) break;
+    yield call(() => store.setState({ progress: msg.progress }));
+  }
+
+  const result = yield join(task);  // 'done'
+}
+```
+
+The channel receives `END` automatically when the worker function returns (or throws). Use `take(chan)` if you want the saga to auto-terminate on close, or `takeMaybe(chan)` to handle `END` explicitly.
+
+#### `callWorkerGen(fn, handler, ...args)` — bidirectional
+
+Runs a function in a worker with **two-way communication**. The worker function receives a `send(value): Promise<response>` function. Each `send` pauses the worker until the saga's handler processes the value and returns a response. Blocking — the saga waits until the worker completes.
+
+```ts
+function* saga({ callWorkerGen, select, call }) {
+  const result = yield callWorkerGen(
+    // Worker side — sends values, receives responses
+    async (send, rawData: string) => {
+      const validated = await send({ step: 'validate', data: rawData });
+      const enriched = await send({ step: 'enrich', data: validated });
+      return enriched;
+    },
+    // Saga handler — runs on main thread with full effect access
+    function* (msg) {
+      if (msg.step === 'validate') {
+        return yield call(validateApi, msg.data);
+      }
+      if (msg.step === 'enrich') {
+        const config = yield select((s) => s.enrichConfig);
+        return yield call(enrichApi, msg.data, config);
+      }
+    },
+    inputData,
+  );
+}
+```
+
+The handler is a generator that runs as a sub-saga on the main thread — it has full access to all saga effects (`select`, `call`, `delay`, `put`, etc.). This is useful when the worker needs data or services that only the main thread can provide.
+
+#### Worker protocol (URL-based workers)
+
+When using a URL, your worker file must implement this message protocol:
+
+**Standard** (`callWorker`, `forkWorker`, `spawnWorker`):
+
+```
+Main → Worker:  { type: 'exec', args: [...] }
+Worker → Main:  { type: 'result', value: ... }
+Worker → Main:  { type: 'error', message: string, stack?: string }
+Main → Worker:  { type: 'cancel' }
+```
+
+**Channel** (`forkWorkerChannel`) — adds `emit`:
+
+```
+Worker → Main:  { type: 'emit', value: ... }      // streamed values
+Worker → Main:  { type: 'result', value: ... }     // final return
+```
+
+**Gen** (`callWorkerGen`) — adds `send`/`response`:
+
+```
+Worker → Main:  { type: 'send', value: ... }       // request to handler
+Main → Worker:  { type: 'response', value: ... }   // handler's response
+Worker → Main:  { type: 'result', value: ... }      // final return
+```
+
+#### `join(task)`
+
+Waits for a forked/spawned task to complete. Returns the task's result.
+
+```ts
+function* saga({ fork, join }) {
+  const task = yield fork(worker);
+  const result = yield join(task);
 }
 ```
 
@@ -222,7 +478,7 @@ function* rootSaga() {
 Cancels a running task. Cancellation is cooperative — the task stops at the next yield point.
 
 ```ts
-function* saga() {
+function* saga({ fork, cancel, delay }) {
   const task = yield fork(worker);
   yield delay(5000);
   yield cancel(task);
@@ -234,8 +490,18 @@ function* saga() {
 Pauses the saga for `ms` milliseconds.
 
 ```ts
-function* saga() {
-  yield delay(1000); // wait 1 second
+function* saga({ delay }) {
+  yield delay(1000);
+}
+```
+
+#### `retry(maxTries, delayMs, fn, ...args)`
+
+Calls a function up to `maxTries` times with `delayMs` between attempts. Throws if all attempts fail.
+
+```ts
+function* saga({ retry }) {
+  const data = yield retry(5, 2000, fetchApi, '/unstable-endpoint');
 }
 ```
 
@@ -244,7 +510,7 @@ function* saga() {
 Runs multiple effects concurrently. Resolves with the first to complete. The result is an object where the winner's key has a value and all others are `undefined`. Losing takers are automatically cleaned up.
 
 ```ts
-function* saga() {
+function* saga({ take, race, delay }) {
   const result = yield race({
     response: take('fetchComplete'),
     timeout: delay(5000),
@@ -263,7 +529,7 @@ function* saga() {
 Runs multiple effects concurrently and waits for all to complete. Returns an array of results in the same order. If any effect rejects, all are cancelled.
 
 ```ts
-function* saga() {
+function* saga({ all, call }) {
   const [users, posts] = yield all([
     call(fetchUsers),
     call(fetchPosts),
@@ -271,17 +537,196 @@ function* saga() {
 }
 ```
 
+#### `actionChannel(pattern, buffer?)`
+
+Creates a buffered channel that queues store actions matching `pattern`. Use with `take(channel)` to process actions sequentially with backpressure.
+
+```ts
+function* saga({ actionChannel, take, call }) {
+  // Buffer all 'request' actions
+  const chan = yield actionChannel('request');
+
+  // Process them one at a time
+  while (true) {
+    const action = yield take(chan);
+    yield call(handleRequest, action.payload);
+  }
+}
+```
+
+Without `actionChannel`, rapid actions would be lost if the saga is busy processing a previous one. The channel buffers them until the saga is ready.
+
+Optional second argument controls the buffer strategy (default: `buffers.expanding()`):
+
+```ts
+import { buffers } from 'zustand-sagas';
+
+const chan = yield actionChannel('request', buffers.sliding(5));
+```
+
+#### `flush(channel)`
+
+Drains all buffered messages from a channel and returns them as an array.
+
+```ts
+function* saga({ actionChannel, flush, delay }) {
+  const chan = yield actionChannel('event');
+  yield delay(1000); // let events accumulate
+  const events = yield flush(chan); // get all buffered events at once
+}
+```
+
+### Channels
+
+Channels are message queues that sagas can read from (`take`) and write to (`put`). They enable communication between sagas, integration with external event sources, and buffered action processing.
+
+#### `channel(buffer?)`
+
+Creates a point-to-point channel. Each message is delivered to a single taker (first registered wins).
+
+```ts
+import { channel } from 'zustand-sagas';
+
+const chan = channel<string>();
+
+// Producer saga
+function* producer() {
+  chan.put('hello');
+  chan.put('world');
+}
+
+// Consumer saga
+function* consumer({ take }) {
+  const msg = yield take(chan); // 'hello'
+}
+```
+
+Default buffer is `buffers.expanding()`. Pass a different buffer to control capacity:
+
+```ts
+import { channel, buffers } from 'zustand-sagas';
+
+const chan = channel<number>(buffers.sliding(100));
+```
+
+#### `multicastChannel()`
+
+Creates a channel where **all** registered takers receive each message (broadcast).
+
+```ts
+import { multicastChannel } from 'zustand-sagas';
+
+const chan = multicastChannel<string>();
+
+// Both sagas receive 'hello'
+function* listener1({ take }) { const msg = yield take(chan); }
+function* listener2({ take }) { const msg = yield take(chan); }
+
+chan.put('hello'); // delivered to both
+```
+
+#### `eventChannel(subscribe, buffer?)`
+
+Bridges external event sources (WebSocket, DOM events, timers, SSE) into a channel that sagas can `take` from.
+
+The `subscribe` function receives an `emit` callback and must return an unsubscribe function. Emitting `END` closes the channel.
+
+```ts
+import { eventChannel, END } from 'zustand-sagas';
+
+// WebSocket
+const wsChannel = eventChannel<Message>((emit) => {
+  const ws = new WebSocket('wss://api.example.com');
+  ws.onmessage = (e) => emit(JSON.parse(e.data));
+  ws.onerror = () => emit(END);
+  ws.onclose = () => emit(END);
+  return () => ws.close();
+});
+
+// Timer countdown
+const countdown = eventChannel<number>((emit) => {
+  let n = 10;
+  const id = setInterval(() => {
+    n--;
+    if (n > 0) emit(n);
+    else {
+      emit(END);
+      clearInterval(id);
+    }
+  }, 1000);
+  return () => clearInterval(id);
+});
+```
+
+Use in a saga:
+
+```ts
+function* watchWebSocket({ take, call }) {
+  const chan = eventChannel((emit) => {
+    const ws = new WebSocket(url);
+    ws.onmessage = (e) => emit(JSON.parse(e.data));
+    ws.onclose = () => emit(END);
+    return () => ws.close();
+  });
+
+  while (true) {
+    const msg = yield take(chan); // auto-terminates on END
+    yield call(() => store.setState({ lastMessage: msg }));
+  }
+}
+```
+
+#### `END`
+
+A unique symbol that signals channel closure. When a channel is closed (via `close()` or emitting `END`):
+
+- `take(channel)` auto-terminates the saga
+- `takeMaybe(channel)` returns `END` as a value
+- Further `put()` calls are ignored
+
+```ts
+import { END } from 'zustand-sagas';
+
+chan.put(END);    // closes the channel
+// or
+chan.close();     // equivalent
+```
+
+### Buffers
+
+Buffer strategies control how channels store messages when no taker is ready.
+
+```ts
+import { buffers } from 'zustand-sagas';
+```
+
+| Buffer | Behavior |
+| --- | --- |
+| `buffers.none()` | Zero capacity — items dropped if no taker is waiting |
+| `buffers.fixed(limit?)` | Throws on overflow (default limit: 10) |
+| `buffers.dropping(limit)` | Silently drops new items when full |
+| `buffers.sliding(limit)` | Drops oldest item when full |
+| `buffers.expanding(initial?)` | Grows dynamically, never drops (default) |
+
+```ts
+// Channel with a sliding window of 100 items
+const chan = channel<number>(buffers.sliding(100));
+
+// Action channel that drops overflow
+const reqChan = yield actionChannel('request', buffers.dropping(50));
+```
+
 ### Helpers
 
-Higher-level patterns built on core effects. Use with `yield*` (delegating yield) since they are themselves generators.
+Higher-level patterns built on core effects. Each helper forks an internal loop, so use with plain `yield`.
 
 #### `takeEvery(pattern, worker)`
 
 Forks `worker` for **every** action matching `pattern`. All instances run concurrently.
 
 ```ts
-function* rootSaga() {
-  yield* takeEvery('fetchUser', fetchUserWorker);
+function* rootSaga({ takeEvery }) {
+  yield takeEvery('fetchUser', fetchUserWorker);
 }
 ```
 
@@ -290,8 +735,8 @@ function* rootSaga() {
 Forks `worker` for the latest matching action. Automatically cancels any previously forked instance.
 
 ```ts
-function* rootSaga() {
-  yield* takeLatest('search', searchWorker);
+function* rootSaga({ takeLatest }) {
+  yield takeLatest('search', searchWorker);
 }
 ```
 
@@ -300,8 +745,8 @@ function* rootSaga() {
 Calls `worker` for the first matching action, then blocks until it completes before listening again. Actions arriving while the worker is running are dropped.
 
 ```ts
-function* rootSaga() {
-  yield* takeLeading('submitForm', submitWorker);
+function* rootSaga({ takeLeading }) {
+  yield takeLeading('submitForm', submitWorker);
 }
 ```
 
@@ -310,8 +755,18 @@ function* rootSaga() {
 Waits `ms` after the latest matching action before running `worker`. Restarts the timer on each new action.
 
 ```ts
-function* rootSaga() {
-  yield* debounce(300, 'search', searchWorker);
+function* rootSaga({ debounce }) {
+  yield debounce(300, 'search', searchWorker);
+}
+```
+
+#### `throttle(ms, pattern, worker)`
+
+Processes at most one action per `ms` milliseconds. Accepts the first, then ignores for the duration.
+
+```ts
+function* rootSaga({ throttle }) {
+  yield throttle(500, 'scroll', scrollHandler);
 }
 ```
 
@@ -320,70 +775,14 @@ function* rootSaga() {
 Tasks are returned by `fork`, `spawn`, and `runSaga`. They represent a running saga and provide control over its lifecycle.
 
 ```ts
-interface Task<R = unknown> {
+interface Task<Result = unknown> {
   id: number;
   isRunning(): boolean;
   isCancelled(): boolean;
-  result(): R | undefined;     // the return value (undefined until completion)
-  toPromise(): Promise<R>;
+  result(): Result | undefined;   // the return value (undefined until completion)
+  toPromise(): Promise<Result>;
   cancel(): void;
 }
-```
-
-The generic parameter `R` is inferred from the saga's return type:
-
-```ts
-function* mySaga() {
-  return 42;
-}
-
-const task = runSaga(mySaga, env); // Task<number>
-const value = await task.toPromise(); // number
-task.result(); // number | undefined
-```
-
-### Advanced
-
-#### `ActionChannel`
-
-The internal pub/sub mechanism. Exported for testing and advanced use cases.
-
-```ts
-import { ActionChannel } from 'zustand-sagas';
-
-const channel = new ActionChannel();
-
-const { promise, takerId } = channel.take('myAction');
-
-channel.emit({ type: 'myAction', payload: 42 });
-
-// Remove a pending taker (used in race cleanup)
-channel.removeTaker(takerId);
-```
-
-#### `runSaga(saga, env, ...args)`
-
-Run a saga outside of the Zustand middleware. Useful for testing sagas in isolation.
-
-```ts
-import { runSaga, ActionChannel } from 'zustand-sagas';
-
-const channel = new ActionChannel();
-const state = { count: 0 };
-
-const task = runSaga(mySaga, {
-  channel,
-  getState: () => state,
-  context: {
-    set: (partial) => Object.assign(state, partial),
-    get: () => state,
-  },
-});
-
-// Drive the saga by emitting actions
-channel.emit({ type: 'increment' });
-
-const result = await task.toPromise();
 ```
 
 ## Patterns
@@ -391,116 +790,227 @@ const result = await task.toPromise();
 ### Async Counter
 
 ```ts
-const store = create(
-  sagas(function* ({ takeEvery, delay, select, call }) {
-    yield* takeEvery('incrementAsync', function* () {
-      yield delay(1000);
-      const count = yield select((s) => s.count);
-      yield call(() => store.setState({ count: count + 1 }));
-    });
-  }, (set) => ({
-    count: 0,
-    incrementAsync: () => {},
-  })),
-);
+const store = createStore((set) => ({
+  count: 0,
+  incrementAsync: () => {},
+}));
+
+createSaga(store, function* ({ takeEvery, delay, select, call }) {
+  yield takeEvery('incrementAsync', function* () {
+    yield delay(1000);
+    const count = yield select((s) => s.count);
+    yield call(() => store.setState({ count: count + 1 }));
+  });
+});
 ```
 
 ### Fetch with Timeout
 
 ```ts
-const store = create(
-  sagas(function* ({ take, race, call, delay }) {
-    yield take('fetchData');
-    const { data, timeout } = yield race({
-      data: call(fetchApi, '/data'),
-      timeout: delay(5000),
-    });
+const store = createStore((set) => ({
+  data: null,
+  error: null,
+  fetchData: () => {},
+}));
 
-    if (timeout !== undefined) {
-      yield call(() => store.setState({ error: 'Request timed out' }));
-    } else {
-      yield call(() => store.setState({ data }));
-    }
-  }, (set) => ({
-    data: null,
-    error: null,
-    fetchData: () => {},
-  })),
-);
+createSaga(store, function* ({ take, race, call, delay }) {
+  yield take('fetchData');
+  const { data, timeout } = yield race({
+    data: call(fetchApi, '/data'),
+    timeout: delay(5000),
+  });
+
+  if (timeout !== undefined) {
+    yield call(() => store.setState({ error: 'Request timed out' }));
+  } else {
+    yield call(() => store.setState({ data }));
+  }
+});
+```
+
+### Sequential Request Processing
+
+Use `actionChannel` to buffer rapid requests and process them one at a time:
+
+```ts
+const store = createStore((set) => ({
+  results: [],
+  processItem: (id: string) => {},
+}));
+
+createSaga(store, function* ({ actionChannel, take, call }) {
+  const chan = yield actionChannel('processItem');
+
+  while (true) {
+    const action = yield take(chan);
+    yield call(processOnServer, action.payload);
+    yield call(() =>
+      store.setState((s) => ({ ...s, results: [...s.results, action.payload] })),
+    );
+  }
+});
+```
+
+### WebSocket Integration
+
+Bridge a WebSocket into a saga using `eventChannel`:
+
+```ts
+import { eventChannel, END } from 'zustand-sagas';
+
+const store = createStore((set) => ({
+  messages: [],
+  connected: false,
+  connect: () => {},
+}));
+
+createSaga(store, function* ({ take, fork, call }) {
+  yield take('connect');
+
+  const chan = eventChannel<Message>((emit) => {
+    const ws = new WebSocket('wss://api.example.com');
+    ws.onopen = () => store.setState({ connected: true });
+    ws.onmessage = (e) => emit(JSON.parse(e.data));
+    ws.onclose = () => emit(END);
+    return () => ws.close();
+  });
+
+  while (true) {
+    const msg = yield take(chan); // loop ends automatically on END
+    yield call(() =>
+      store.setState((s) => ({ ...s, messages: [...s.messages, msg] })),
+    );
+  }
+});
 ```
 
 ### Saga-to-Saga Communication
 
-Sagas communicate through store actions. One saga triggers a store action via `call()`, another listens for it via `take()`.
+Sagas communicate through the channel. One saga emits an action via `put()`, another listens for it via `take()`.
 
 ```ts
-const store = create(
-  sagas(function* ({ take, fork, call, delay }) {
-    function* producer() {
-      const data = yield call(fetchData);
-      yield call(() => store.getState().dataLoaded(data));
-    }
+const store = createStore((set) => ({
+  data: null,
+  dataLoaded: (data) => set({ data }),
+}));
 
-    function* consumer() {
-      const action = yield take('dataLoaded');
-      console.log('received:', action.payload);
-    }
+createSaga(store, function* ({ take, fork, call, put }) {
+  function* producer() {
+    const data = yield call(fetchData);
+    yield put('dataLoaded', data);
+  }
 
-    yield fork(consumer);  // start listening first
-    yield fork(producer);  // then produce
-  }, (set) => ({
-    data: null,
-    dataLoaded: (data) => set({ data }),
-  })),
-);
+  function* consumer() {
+    const action = yield take('dataLoaded');
+    console.log('received:', action.payload);
+  }
+
+  yield fork(consumer);  // start listening first
+  yield fork(producer);  // then produce
+});
 ```
 
 ### Error Handling
 
 ```ts
-const store = create(
-  sagas(function* ({ takeEvery, call }) {
-    yield* takeEvery('fetchUser', function* (action) {
-      try {
-        const data = yield call(fetchApi, action.payload);
-        yield call(() => store.setState({ data, error: null }));
-      } catch (e) {
-        yield call(() => store.setState({ error: e.message }));
-      }
-    });
-  }, (set) => ({
-    data: null,
-    error: null,
-    fetchUser: (id: string) => {},
-  })),
-);
+const store = createStore((set) => ({
+  data: null,
+  error: null,
+  fetchUser: (id: string) => {},
+}));
+
+createSaga(store, function* ({ takeEvery, call }) {
+  yield takeEvery('fetchUser', function* (action) {
+    try {
+      const data = yield call(fetchApi, action.payload);
+      yield call(() => store.setState({ data, error: null }));
+    } catch (e) {
+      yield call(() => store.setState({ error: e.message }));
+    }
+  });
+});
 ```
 
 ### Cancellable Background Task
 
 ```ts
-const store = create(
-  sagas(function* ({ take, fork, call, cancel, delay }) {
-    function* pollServer() {
-      while (true) {
-        const data = yield call(fetchStatus);
-        yield call(() => store.setState({ status: data }));
-        yield delay(5000);
-      }
-    }
+const store = createStore((set) => ({
+  status: null,
+  startPolling: () => {},
+  stopPolling: () => {},
+}));
 
+createSaga(store, function* ({ take, fork, call, cancel, delay }) {
+  function* pollServer() {
     while (true) {
-      yield take('startPolling');
-      const task = yield fork(pollServer);
-      yield take('stopPolling');
-      yield cancel(task);
+      const data = yield call(fetchStatus);
+      yield call(() => store.setState({ status: data }));
+      yield delay(5000);
     }
-  }, (set) => ({
-    status: null,
-    startPolling: () => {},
-    stopPolling: () => {},
-  })),
-);
+  }
+
+  while (true) {
+    yield take('startPolling');
+    const task = yield fork(pollServer);
+    yield take('stopPolling');
+    yield cancel(task);
+  }
+});
+```
+
+### Offload to Web Worker
+
+```ts
+const store = createStore((set) => ({
+  result: null,
+  processData: (data: number[]) => {},
+}));
+
+createSaga(store, function* ({ takeEvery, callWorker, call }) {
+  yield takeEvery('processData', function* (action) {
+    // Heavy computation runs off the main thread
+    const result = yield callWorker((data: number[]) => {
+      return data.map((n) => Math.sqrt(n)).filter((n) => n % 1 === 0);
+    }, action.payload);
+
+    yield call(() => store.setState({ result }));
+  });
+});
+```
+
+### Worker with Progress Streaming
+
+```ts
+import { END } from 'zustand-sagas';
+
+const store = createStore((set) => ({
+  progress: 0,
+  results: [],
+  startProcessing: (items: string[]) => {},
+}));
+
+createSaga(store, function* ({ take, forkWorkerChannel, takeMaybe, call }) {
+  yield take('startProcessing');
+
+  const { channel: chan } = yield forkWorkerChannel(
+    (emit, items: string[]) => {
+      const results = [];
+      for (let i = 0; i < items.length; i++) {
+        // Heavy per-item work happens in the worker
+        results.push(items[i].toUpperCase());
+        emit({ progress: (i + 1) / items.length });
+      }
+      return results;
+    },
+    store.getState().results,
+  );
+
+  while (true) {
+    const msg = yield takeMaybe(chan);
+    if (msg === END) break;
+    yield call(() => store.setState({ progress: msg.progress }));
+  }
+});
 ```
 
 ## Comparison with redux-saga
@@ -537,7 +1047,7 @@ function counterReducer(state = { count: 0 }, action) {
 // saga
 function* onIncrementAsync() {
   yield delay(1000);
-  yield put({ type: INCREMENT });  // dispatches to Redux store
+  yield put({ type: INCREMENT });
 }
 
 function* rootSaga() {
@@ -551,19 +1061,18 @@ dispatch({ type: INCREMENT_ASYNC });
 **Zustand + zustand-sagas:**
 
 ```ts
-// store — actions, state, and sagas in one place
-const store = create(
-  sagas(function* ({ takeEvery, delay, select, call }) {
-    yield* takeEvery('incrementAsync', function* () {
-      yield delay(1000);
-      const count = yield select((s) => s.count);
-      yield call(() => store.setState({ count: count + 1 }));
-    });
-  }, (set) => ({
-    count: 0,
-    incrementAsync: () => {},
-  })),
-);
+const store = createStore((set) => ({
+  count: 0,
+  incrementAsync: () => {},
+}));
+
+createSaga(store, function* ({ takeEvery, delay, select, call }) {
+  yield takeEvery('incrementAsync', function* () {
+    yield delay(1000);
+    const count = yield select((s) => s.count);
+    yield call(() => store.setState({ count: count + 1 }));
+  });
+});
 
 // call the action directly
 store.getState().incrementAsync();
@@ -572,17 +1081,15 @@ store.getState().incrementAsync();
 ### What's different
 
 | | redux-saga | zustand-sagas |
-|---|---|---|
+| --- | --- | --- |
 | **Actions** | String constants + action creator functions | Store function names (automatic) |
 | **Dispatching** | `dispatch({ type: 'INCREMENT' })` | `store.getState().increment()` |
 | **State mutation** | `put()` dispatches to reducer | State updated directly in store actions |
 | **Saga triggers** | Intercepts dispatched action objects | Intercepts store function calls |
-| **Saga-to-saga** | `put()` emits to channel | `call()` invokes a store action |
+| **Saga-to-saga** | `put({ type, payload })` | `put('actionName', ...args)` |
 | **Boilerplate** | Action types + action creators + reducer + saga | Store actions + saga |
 | **Store** | Redux | Zustand |
-| **Channels** | Buffered, multicast | Unbuffered, first-match |
-| **Bundle** | ~14 KB min | ~3 KB min |
-| **TypeScript** | Partial (heavy use of `any`) | Full — injected effects validate action names at compile time |
+| **TypeScript** | Partial (heavy use of `any`) | Full — action names, payloads, selectors, channels, and task results are all type-checked |
 
 ### What's the same
 
@@ -592,23 +1099,155 @@ Both libraries share the same generator-based mental model:
 - **`call`** — invoke a function and wait for the result
 - **`select`** — read current state
 - **`fork` / `spawn`** — start concurrent tasks (attached vs detached)
-- **`cancel`** — stop a running task cooperatively
-- **`delay`** — pause for a duration
+- **`cancel`** / **`join`** — task lifecycle control
+- **`delay`** / **`retry`** — timing utilities
 - **`race` / `all`** — concurrency combinators
-- **`takeEvery`, `takeLatest`, `takeLeading`, `debounce`** — high-level watcher patterns
+- **`takeEvery`, `takeLatest`, `takeLeading`, `debounce`, `throttle`** — high-level watcher patterns
+- **`channel`, `eventChannel`, `actionChannel`** — buffered channels and external event sources
+- **`END`** — channel termination signal
+- **`buffers`** — buffer strategies (none, fixed, dropping, sliding, expanding)
+- **`cps`** — Node.js callback-style functions
+- **`put`** — emit actions into the saga channel
+- **`callWorker` / `forkWorker` / `spawnWorker`** — run functions in Web Workers / worker threads
+- **`forkWorkerChannel`** — stream values from a worker through a channel
+- **`callWorkerGen`** — bidirectional worker ↔ saga communication
+- **`cloneableGenerator`**, **`createMockTask`** — testing utilities
+- **`runSaga`** — run sagas outside of a store for testing
 
-If you know redux-saga, the effects work the same way. The difference is how actions enter the system — not how sagas process them.
+## Testing Utilities
 
-### What's gone
+### `cloneableGenerator(fn)`
 
-| redux-saga | zustand-sagas | Why |
+Wraps a generator function so you can `.clone()` it at any point — useful for testing different branches from the same saga state without rerunning from the start.
+
+```ts
+import { cloneableGenerator } from 'zustand-sagas';
+
+function* mySaga(value: number) {
+  const state = yield select();
+  if (state > 0) {
+    yield put('positive');
+    return 'positive';
+  } else {
+    yield call(fallbackFn);
+    return 'non-positive';
+  }
+}
+
+const gen = cloneableGenerator(mySaga)(10);
+gen.next();  // yield select()
+
+// Clone at the branch point
+const positive = gen.clone();
+const nonPositive = gen.clone();
+
+positive.next(5);      // takes the if branch
+nonPositive.next(-1);  // takes the else branch
+```
+
+### `createMockTask()`
+
+Creates a mock `Task` for testing sagas that use `fork`, `join`, or `cancel` without running real sagas. Returns an extended `Task` with setters to control state.
+
+```ts
+import { createMockTask, fork, cancel, join } from 'zustand-sagas';
+
+const task = createMockTask();
+task.isRunning();   // true
+task.isCancelled(); // false
+
+// Control the mock
+task.setRunning(false);
+task.setResult(42);
+task.result();      // 42
+
+// Or simulate failure
+task.setError(new Error('boom'));
+await task.toPromise(); // rejects with 'boom'
+```
+
+Use it to step through a saga generator manually:
+
+```ts
+function* mySaga() {
+  const task = yield fork(worker);
+  yield delay(5000);
+  yield cancel(task);
+}
+
+const gen = mySaga();
+gen.next();                         // yield fork(worker) — returns ForkEffect
+
+const mockTask = createMockTask();
+gen.next(mockTask);                 // saga receives mockTask, yield delay(5000)
+const cancelEffect = gen.next();    // yield cancel(mockTask)
+expect(cancelEffect.value).toEqual(cancel(mockTask));
+```
+
+### `runSaga(saga, env, ...args)`
+
+Runs a saga outside of a store. Useful for integration-testing sagas with a real runner but without attaching to a Zustand store.
+
+```ts
+import { runSaga, ActionChannel } from 'zustand-sagas';
+
+const channel = new ActionChannel();
+const state = { count: 0 };
+
+const task = runSaga(mySaga, {
+  channel,
+  getState: () => state,
+});
+
+// Drive the saga by emitting actions
+channel.emit({ type: 'increment', payload: 1 });
+
+// Wait for the saga to complete
+const result = await task.toPromise();
+
+// Cancel if needed
+task.cancel();
+```
+
+`runSaga` processes all effects (take, call, fork, actionChannel, etc.) the same way `createSaga` does — the only difference is that store actions aren't auto-wrapped.
+
+## Type Safety
+
+The `SagaApi<State>` interface derives all type information from your store's state type. Every action-related effect constrains its arguments to valid store function names and their parameter types.
+
+```ts
+type Store = {
+  count: number;
+  increment: () => void;
+  search: (q: string) => void;
+  setPosition: (x: number, y: number) => void;
+};
+
+// Given SagaApi<StoreState>:
+yield take('increment');           // ✓
+yield take('count');               // ✗ — not a function
+yield take('typo');                // ✗ — doesn't exist
+
+yield put('search', 'query');      // ✓
+yield put('search');               // ✗ — missing required arg
+yield put('search', 123);          // ✗ — wrong arg type
+yield put('setPosition', 10, 20);  // ✓
+
+yield select((s) => s.count);      // s: Store, returns number
+```
+
+Effect types are generic where it matters:
+
+| Effect | Generic | Preserves |
 |---|---|---|
-| `put(action)` | `call(() => store.getState().fn())` | No separate dispatch channel. Store actions are the channel. |
-| `dispatch()` | *(removed)* | Same reason — call the store action directly. |
-| `actionChannel` | *(not needed)* | No buffered channels in v1. |
-| `throttle` | *(not included)* | Use `takeLatest` + `delay` or `debounce`. |
-| Action constants | *(not needed)* | Function names are the identifiers. |
-| Action creators | *(not needed)* | Store functions are the actions. |
+| `TakeEffect<Value>` | Channel value type | `take(channel)` keeps `Value` |
+| `TakeMaybeEffect<Value>` | Channel value type | Same |
+| `JoinEffect<Result>` | Task result type | `join(task)` keeps `Result` |
+| `CancelEffect<Result>` | Task result type | `cancel(task)` keeps `Result` |
+| `FlushEffect<Value>` | Channel value type | `flush(channel)` keeps `Value` |
+| `Task<Result>` | Result type | `fork`/`spawn` return typed tasks |
+
+All generics have defaults, so unparameterized usage (`TakeEffect`, `JoinEffect`, etc.) works unchanged.
 
 ## Types
 
@@ -616,16 +1255,34 @@ All types are exported for use in TypeScript projects:
 
 ```ts
 import type {
-  SagaApi,           // Typed effects injected into the root saga
-  ActionEvent,       // { type: string; payload?: unknown }
-  ActionNames,       // Extracts function-property keys from a store state type
-  ActionPayload,     // Derives payload type for a given action
-  TypedActionEvent,  // Typed action event for a specific store action
+  SagaApi,             // Typed effects injected into the root saga
+  UseSaga,             // Return type of createSaga
+  RootSagaFn,          // Root saga function signature
+  ActionEvent,         // { type: string; payload?: unknown }
+  ActionNames,         // Extracts function-property keys from a store state type
+  ActionArgs,          // Extracts raw parameter tuple for a store action
+  ActionPayload,       // Derives payload type for a given action
+  TypedActionEvent,    // Typed action event for a specific store action
   ActionPattern,
   Effect,
-  Task,
+  TakeEffect,          // TakeEffect<Value> — generic over channel value type
+  TakeMaybeEffect,     // TakeMaybeEffect<Value>
+  JoinEffect,          // JoinEffect<Result> — generic over task result type
+  CancelEffect,        // CancelEffect<Result>
+  FlushEffect,         // FlushEffect<Value>
+  Task,                // Task<Result> — generic over result type
+  Saga,                // User-facing saga generator type: Generator<Effect, Result, any>
   SagaFn,
-  SagaContext,
+  Channel,             // Channel interface
+  Buffer,              // Buffer interface
+  CallWorkerEffect,    // callWorker effect type
+  ForkWorkerEffect,    // forkWorker effect type
+  SpawnWorkerEffect,   // spawnWorker effect type
+  WorkerFn,            // Function or URL accepted by worker effects
+  ForkWorkerChannelEffect,  // forkWorkerChannel effect type
+  CallWorkerGenEffect,      // callWorkerGen effect type
+  MockTask,            // createMockTask return type (Task + setters)
+  CloneableGenerator,  // Cloneable generator for testing
   StoreSagas,
   RunnerEnv,
 } from 'zustand-sagas';

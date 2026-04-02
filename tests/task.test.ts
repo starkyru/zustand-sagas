@@ -4,7 +4,9 @@ import { createTask } from '../src/task';
 describe('Task', () => {
   it('reports running state correctly', async () => {
     let resolve!: (v: unknown) => void;
-    const p = new Promise((r) => { resolve = r; });
+    const p = new Promise((r) => {
+      resolve = r;
+    });
     const task = createTask(p, () => {});
 
     expect(task.isRunning()).toBe(true);
@@ -21,7 +23,9 @@ describe('Task', () => {
   it('cancel sets flags and calls onCancel', () => {
     let cancelled = false;
     const p = new Promise(() => {}); // never resolves
-    const task = createTask(p, () => { cancelled = true; });
+    const task = createTask(p, () => {
+      cancelled = true;
+    });
 
     task.cancel();
 
@@ -33,7 +37,9 @@ describe('Task', () => {
   it('cancel is idempotent', () => {
     let count = 0;
     const p = new Promise(() => {});
-    const task = createTask(p, () => { count++; });
+    const task = createTask(p, () => {
+      count++;
+    });
 
     task.cancel();
     task.cancel();
