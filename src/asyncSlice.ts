@@ -9,13 +9,15 @@
  * type UserSlice = AsyncSlice<'user', User, [id: string]>;
  *
  * const userSlice = createAsyncSlice<'user', User, [id: string]>('user', set);
- * // userSlice.user            — User | null
- * // userSlice.userLoading     — boolean
- * // userSlice.userError       — string | null
- * // userSlice.fetchUser(id)   — starts loading
- * // userSlice.setUser(data)   — sets data, clears loading
- * // userSlice.setUserError(e) — sets error, clears data & loading
- * // userSlice.resetUser()     — resets everything
+ * // userSlice.user              — User | null
+ * // userSlice.isUserLoading     — boolean
+ * // userSlice.isUserError       — boolean
+ * // userSlice.isUserSuccess     — boolean
+ * // userSlice.userError         — string | null
+ * // userSlice.fetchUser(id)     — starts loading
+ * // userSlice.setUser(data)     — sets data, marks success
+ * // userSlice.setUserError(e)   — sets error, clears data
+ * // userSlice.resetUser()       — resets everything
  * ```
  */
 
@@ -26,7 +28,9 @@
 export type AsyncSlice<Name extends string, T, Args extends unknown[] = []> = {
   [K in Name]: T | null;
 } & {
-  [K in `${Name}Loading`]: boolean;
+  [K in `is${Capitalize<Name>}Loading`]: boolean;
+} & { [K in `is${Capitalize<Name>}Error`]: boolean } & {
+  [K in `is${Capitalize<Name>}Success`]: boolean;
 } & { [K in `${Name}Error`]: string | null } & {
   [K in `fetch${Capitalize<Name>}`]: (...args: Args) => void;
 } & { [K in `set${Capitalize<Name>}`]: (data: T) => void } & {
@@ -52,31 +56,41 @@ export function createAsyncSlice<Name extends string, T, Args extends unknown[] 
 
   return {
     [name]: null,
-    [`${name}Loading`]: false,
+    [`is${cap}Loading`]: false,
+    [`is${cap}Error`]: false,
+    [`is${cap}Success`]: false,
     [`${name}Error`]: null,
     [`fetch${cap}`]: (..._args: Args) => {
       set({
-        [`${name}Loading`]: true,
+        [`is${cap}Loading`]: true,
+        [`is${cap}Error`]: false,
+        [`is${cap}Success`]: false,
         [`${name}Error`]: null,
       });
     },
     [`set${cap}`]: (data: T) => {
       set({
         [name]: data,
-        [`${name}Loading`]: false,
+        [`is${cap}Loading`]: false,
+        [`is${cap}Error`]: false,
+        [`is${cap}Success`]: true,
       });
     },
     [`set${cap}Error`]: (error: string) => {
       set({
         [name]: null,
-        [`${name}Loading`]: false,
+        [`is${cap}Loading`]: false,
+        [`is${cap}Error`]: true,
+        [`is${cap}Success`]: false,
         [`${name}Error`]: error,
       });
     },
     [`reset${cap}`]: () => {
       set({
         [name]: null,
-        [`${name}Loading`]: false,
+        [`is${cap}Loading`]: false,
+        [`is${cap}Error`]: false,
+        [`is${cap}Success`]: false,
         [`${name}Error`]: null,
       });
     },

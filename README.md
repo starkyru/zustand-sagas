@@ -785,7 +785,9 @@ type UserSlice = AsyncSlice<'user', User, [id: string]>;
 // Expands to:
 // {
 //   user: User | null;
-//   userLoading: boolean;
+//   isUserLoading: boolean;
+//   isUserError: boolean;
+//   isUserSuccess: boolean;
 //   userError: string | null;
 //   fetchUser: (id: string) => void;
 //   setUser: (data: User) => void;
@@ -808,7 +810,7 @@ const store = createStore<Store>((set) => ({
   ...createAsyncSlice<'user', User, [id: string]>('user', set),
 }));
 
-// State: store.getState().user, .userLoading, .userError
+// State: store.getState().user, .isUserLoading, .isUserError, .isUserSuccess, .userError
 // Actions: .fetchUser(id), .setUser(data), .setUserError(msg), .resetUser()
 ```
 
@@ -844,9 +846,9 @@ createSaga(store, function* (api) {
 
 // Trigger from anywhere:
 store.getState().fetchUser('123');
-// → userLoading: true
-// → (on success) user: { id: '123', ... }, userLoading: false
-// → (on failure) userError: 'Not found', userLoading: false
+// → isUserLoading: true
+// → (on success) user: { id: '123', ... }, isUserSuccess: true
+// → (on failure) isUserError: true, userError: 'Not found'
 ```
 
 Multiple async slices compose naturally:
