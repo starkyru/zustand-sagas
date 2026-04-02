@@ -1,6 +1,6 @@
 {
   "name": "zustand-sagas",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Redux-saga-style generator-based side effect management for Zustand",
   "type": "module",
   "main": "./dist/index.cjs",

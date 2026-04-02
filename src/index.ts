@@ -65,6 +65,7 @@ export type { RunnerEnv } from './runner';
 // Async slice helper
 export { createAsyncSlice } from './asyncSlice';
 export type { AsyncSlice } from './asyncSlice';
+export { createAsyncSaga } from './asyncSaga';
 
 // Types
 export type {
