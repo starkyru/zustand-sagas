@@ -9,7 +9,19 @@ function wrapActions<State extends object>(
   channel: ActionChannel,
   wrapped: WeakSet<(...args: any[]) => any>,
 ): State {
-  const result = { ...state } as Record<string, unknown>;
+  const raw = state as Record<string, unknown>;
+  // Fast path: skip cloning if there are no unwrapped functions
+  let needsWrap = false;
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (typeof value === 'function' && !wrapped.has(value as (...args: any[]) => any)) {
+      needsWrap = true;
+      break;
+    }
+  }
+  if (!needsWrap) return state;
+
+  const result = { ...raw };
   for (const key of Object.keys(result)) {
     const value = result[key];
     if (typeof value === 'function' && !wrapped.has(value as (...args: any[]) => any)) {
