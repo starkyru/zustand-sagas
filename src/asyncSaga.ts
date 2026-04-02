@@ -62,10 +62,10 @@ export function createAsyncSaga<
         const payload = action.payload as Payload;
         const args = (Array.isArray(payload) ? payload : [payload]) as Parameters<Fn>;
         const data: T = yield api.call(fetchFn, ...args);
-        (store.getState()[setKey] as (data: T) => void)(data);
+        yield api.call(() => (store.getState()[setKey] as (data: T) => void)(data));
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Unknown error';
-        (store.getState()[setErrorKey] as (err: string) => void)(msg);
+        yield api.call(() => (store.getState()[setErrorKey] as (err: string) => void)(msg));
       }
     });
   };

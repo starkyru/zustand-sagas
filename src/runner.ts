@@ -15,7 +15,6 @@ import {
   FORK,
   SPAWN,
   PUT,
-  PUT_RESOLVE,
   JOIN,
   CANCEL,
   CPS,
@@ -45,6 +44,11 @@ export interface RunnerEnv {
 
 const TERMINATE = Symbol('TERMINATE');
 const WORKER_GRACE_PERIOD_MS = 100;
+
+interface Cancellable {
+  promise: Promise<unknown>;
+  cancel: () => void;
+}
 
 function createWorkerExecution(
   fn: WorkerFn,
@@ -236,18 +240,41 @@ async function createWorkerGenExecution(
 
 export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task {
   let cancelFlag = false;
-  const children: Task[] = [];
+  const children = new Set<Task>();
+  const pendingCleanups = new Set<() => void>();
+  const joinedTasks = new WeakSet<Task>();
 
-  const promise = runGenerator(saga, args);
+  // Reject handle for propagating forked-child errors to the parent
+  let rejectParent: ((error: unknown) => void) | undefined;
+
+  const promise = new Promise<unknown>((resolve, reject) => {
+    rejectParent = reject;
+    runGenerator(saga, args).then(resolve, reject);
+  });
 
   const task = createTask(promise, () => {
     cancelFlag = true;
+    for (const cleanup of pendingCleanups) cleanup();
+    pendingCleanups.clear();
     for (const child of children) {
       child.cancel();
     }
   });
 
   return task;
+
+  function addCleanup(fn: () => void): () => void {
+    pendingCleanups.add(fn);
+    return () => pendingCleanups.delete(fn);
+  }
+
+  function trackChild(childTask: Task): void {
+    children.add(childTask);
+    childTask.toPromise().then(
+      () => children.delete(childTask),
+      () => children.delete(childTask),
+    );
+  }
 
   async function runGenerator(gen: SagaFn, genArgs: unknown[]): Promise<unknown> {
     const iterator = gen(...genArgs);
@@ -280,6 +307,67 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
     }
 
     return result.value;
+  }
+
+  /**
+   * Returns a cancellable handle for an effect. Used by RACE to cancel
+   * losing branches (TAKE, DELAY, CALL with generators, etc.).
+   */
+  function processEffectCancellable(effect: Effect): Cancellable {
+    switch (effect.type) {
+      case TAKE: {
+        if (effect.channel) {
+          const { promise: chanPromise, cancel: cancelTake } = effect.channel.take();
+          return {
+            promise: chanPromise.then((value) => (value === END ? TERMINATE : value)),
+            cancel: cancelTake,
+          };
+        }
+        const { promise: takePromise, takerId } = env.channel.take(effect.pattern!);
+        return {
+          promise: takePromise,
+          cancel: () => env.channel.removeTaker(takerId),
+        };
+      }
+
+      case TAKE_MAYBE: {
+        if (effect.channel) {
+          const { promise: chanPromise, cancel: cancelTake } = effect.channel.take();
+          return { promise: chanPromise, cancel: cancelTake };
+        }
+        const { promise: takePromise, takerId } = env.channel.take(effect.pattern!);
+        return {
+          promise: takePromise,
+          cancel: () => env.channel.removeTaker(takerId),
+        };
+      }
+
+      case DELAY: {
+        let timerId: ReturnType<typeof setTimeout>;
+        const delayPromise = new Promise<unknown>((resolve) => {
+          timerId = setTimeout(() => resolve(undefined), effect.ms);
+        });
+        return {
+          promise: delayPromise,
+          cancel: () => clearTimeout(timerId),
+        };
+      }
+
+      case CALL: {
+        const callResult = effect.fn(...effect.args);
+        if (isGenerator(callResult)) {
+          const childTask = runSaga(() => callResult as Generator<Effect, unknown, unknown>, env);
+          return {
+            promise: childTask.toPromise(),
+            cancel: () => childTask.cancel(),
+          };
+        }
+        return { promise: Promise.resolve(callResult), cancel: () => {} };
+      }
+
+      default:
+        return { promise: processEffect(effect), cancel: () => {} };
+    }
   }
 
   async function processEffect(effect: Effect): Promise<unknown> {
@@ -321,13 +409,24 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
       case FORK: {
         const childTask = runSaga(effect.saga, env, ...effect.args);
-        children.push(childTask);
-        childTask.toPromise().catch(() => {});
+        trackChild(childTask);
+        // Propagate unhandled errors from forked children to the parent
+        // (unless the child was joined, in which case the joiner handles the error)
+        childTask.toPromise().catch((err) => {
+          if (!childTask.isCancelled() && !joinedTasks.has(childTask) && rejectParent) {
+            cancelFlag = true;
+            for (const child of children) {
+              if (child !== childTask) child.cancel();
+            }
+            rejectParent(err);
+          }
+        });
         return childTask;
       }
 
       case SPAWN: {
         const childTask = runSaga(effect.saga, env, ...effect.args);
+        // Spawned tasks are detached — errors don't propagate
         childTask.toPromise().catch(() => {});
         return childTask;
       }
@@ -337,12 +436,8 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
         return effect.action;
       }
 
-      case PUT_RESOLVE: {
-        env.channel.emit(effect.action);
-        return effect.action;
-      }
-
       case JOIN: {
+        joinedTasks.add(effect.task);
         return effect.task.toPromise();
       }
 
@@ -361,7 +456,16 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       }
 
       case DELAY: {
-        return new Promise((resolve) => setTimeout(resolve, effect.ms));
+        return new Promise((resolve) => {
+          const timerId = setTimeout(() => {
+            removeCleanup();
+            resolve(undefined);
+          }, effect.ms);
+          const removeCleanup = addCleanup(() => {
+            clearTimeout(timerId);
+            resolve(undefined);
+          });
+        });
       }
 
       case CALL_WORKER: {
@@ -372,7 +476,7 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       case FORK_WORKER: {
         const execution = createWorkerExecution(effect.fn, effect.args);
         const childTask = createTask(execution.promise, execution.cancel);
-        children.push(childTask);
+        trackChild(childTask);
         childTask.toPromise().catch(() => {});
         return childTask;
       }
@@ -387,7 +491,7 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       case FORK_WORKER_CHANNEL: {
         const channelExec = createWorkerChannelExecution(effect.fn, effect.args);
         const childTask = createTask(channelExec.promise, channelExec.cancel);
-        children.push(childTask);
+        trackChild(childTask);
         childTask.toPromise().catch(() => {});
         return { channel: channelExec.channel, task: childTask };
       }
@@ -398,9 +502,10 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
       case ACTION_CHANNEL: {
         const chan = createChannel<import('./types').ActionEvent>(effect.buffer);
-        env.channel.subscribe(effect.pattern, (action) => {
+        const subId = env.channel.subscribe(effect.pattern, (action) => {
           chan.put(action);
         });
+        addCleanup(() => env.channel.unsubscribe(subId));
         return chan;
       }
 
@@ -427,10 +532,13 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
         return new Promise<true | typeof END>((resolve) => {
           let timeoutId: ReturnType<typeof setTimeout> | undefined;
+          let settled = false;
 
           const unsubscribe = env.subscribe!((state) => {
-            if (selector(state)) {
+            if (!settled && selector(state)) {
+              settled = true;
               if (timeoutId !== undefined) clearTimeout(timeoutId);
+              removeCleanup();
               unsubscribe();
               resolve(true);
             }
@@ -438,48 +546,41 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
           if (effect.timeout !== undefined) {
             timeoutId = setTimeout(() => {
-              unsubscribe();
-              resolve(END);
+              if (!settled) {
+                settled = true;
+                removeCleanup();
+                unsubscribe();
+                resolve(END);
+              }
             }, effect.timeout);
           }
+
+          const removeCleanup = addCleanup(() => {
+            if (!settled) {
+              settled = true;
+              if (timeoutId !== undefined) clearTimeout(timeoutId);
+              unsubscribe();
+              resolve(true);
+            }
+          });
         });
       }
 
       case RACE: {
         const entries = Object.entries(effect.effects);
-        const cleanups: (() => void)[] = [];
+        const branches: Cancellable[] = entries.map(([, eff]) => processEffectCancellable(eff));
 
-        const racePromises = entries.map(([key, eff]) => {
-          if (eff.type === TAKE) {
-            if (eff.channel) {
-              const { promise: chanPromise, cancel: cancelTake } = eff.channel.take();
-              cleanups.push(cancelTake);
-              return chanPromise.then((value) => ({
-                key,
-                value: value === END ? TERMINATE : value,
-              }));
-            }
-            const { promise: takePromise, takerId } = env.channel.take(eff.pattern!);
-            cleanups.push(() => env.channel.removeTaker(takerId));
-            return takePromise.then((value) => ({ key, value }));
-          }
-          if (eff.type === TAKE_MAYBE) {
-            if (eff.channel) {
-              const { promise: chanPromise, cancel: cancelTake } = eff.channel.take();
-              cleanups.push(cancelTake);
-              return chanPromise.then((value) => ({ key, value }));
-            }
-            const { promise: takePromise, takerId } = env.channel.take(eff.pattern!);
-            cleanups.push(() => env.channel.removeTaker(takerId));
-            return takePromise.then((value) => ({ key, value }));
-          }
-          return processEffect(eff).then((value) => ({ key, value }));
-        });
+        const racePromises = branches.map((branch, i) =>
+          branch.promise.then((value) => ({ key: entries[i][0], value })),
+        );
 
         const winner = await Promise.race(racePromises);
 
-        for (const cleanup of cleanups) {
-          cleanup();
+        // Cancel all losing branches
+        for (let i = 0; i < branches.length; i++) {
+          if (entries[i][0] !== winner.key) {
+            branches[i].cancel();
+          }
         }
 
         const result: Record<string, unknown> = {};

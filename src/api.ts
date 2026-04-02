@@ -6,7 +6,6 @@ import {
   fork,
   spawn,
   put,
-  putResolve,
   join,
   cancel,
   cps,
@@ -38,7 +37,6 @@ import type {
   TakeEffect,
   TakeMaybeEffect,
   PutEffect,
-  PutResolveEffect,
   SelectEffect,
   ForkEffect,
   ActionChannelEffect,
@@ -104,15 +102,6 @@ export interface SagaApi<State> {
   put<Key extends ActionNames<State>>(type: Key, ...args: ActionArgs<State, Key>): PutEffect;
   putApply<Key extends ActionNames<State>>(type: Key, args: ActionArgs<State, Key>): PutEffect;
 
-  putResolve<Key extends ActionNames<State>>(
-    type: Key,
-    ...args: ActionArgs<State, Key>
-  ): PutResolveEffect;
-  putResolveApply<Key extends ActionNames<State>>(
-    type: Key,
-    args: ActionArgs<State, Key>,
-  ): PutResolveEffect;
-
   until<Key extends string & keyof State>(predicate: Key, timeout?: number): UntilEffect;
   until(predicate: (state: State) => unknown, timeout?: number): UntilEffect;
 
@@ -158,10 +147,6 @@ export function createSagaApi<State>(): SagaApi<State> {
       put(argsToAction(type, args))) as SagaApi<State>['put'],
     putApply: (<Key extends ActionNames<State>>(type: Key, args: ActionArgs<State, Key>) =>
       put(argsToAction(type, args as unknown[]))) as SagaApi<State>['putApply'],
-    putResolve: (<Key extends ActionNames<State>>(type: Key, ...args: ActionArgs<State, Key>) =>
-      putResolve(argsToAction(type, args))) as SagaApi<State>['putResolve'],
-    putResolveApply: (<Key extends ActionNames<State>>(type: Key, args: ActionArgs<State, Key>) =>
-      putResolve(argsToAction(type, args as unknown[]))) as SagaApi<State>['putResolveApply'],
     until: untypedUntil as SagaApi<State>['until'],
     call,
     select: select as SagaApi<State>['select'],

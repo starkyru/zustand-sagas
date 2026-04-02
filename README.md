@@ -235,16 +235,6 @@ function* saga({ putApply }) {
 }
 ```
 
-#### `putResolve(actionName, ...args)` / `putResolveApply(actionName, args)`
-
-Blocking variants of `put`/`putApply`. Same signature and behavior, explicitly blocking — the saga waits for the effect to complete before continuing.
-
-```ts
-function* saga({ putResolve }) {
-  yield putResolve('dataReady', result);
-}
-```
-
 #### `call(fn, ...args)`
 
 Calls a function and waits for its result. If `fn` returns a generator, it is run as a sub-saga. If it returns a promise, the saga waits for resolution. Arguments are type-checked against the function signature.

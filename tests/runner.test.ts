@@ -8,7 +8,6 @@ import {
   fork,
   spawn,
   put,
-  putResolve,
   join,
   cancel,
   cps,
@@ -230,26 +229,6 @@ describe('runner', () => {
     expect(result).toEqual({ type: 'test' });
   });
 
-  it('processes PUT_RESOLVE effect (blocking put)', async () => {
-    let received: ActionEvent | undefined;
-
-    function* listener() {
-      received = yield take('ping');
-    }
-    function* saga() {
-      yield fork(listener);
-      yield delay(5);
-      const result = yield putResolve({ type: 'ping', payload: 42 });
-      return result;
-    }
-    const env = createEnv();
-    const task = runSaga(saga, env);
-    const result = await task.toPromise();
-    await new Promise((r) => setTimeout(r, 10));
-    expect(received).toEqual({ type: 'ping', payload: 42 });
-    expect(result).toEqual({ type: 'ping', payload: 42 });
-  });
-
   it('processes JOIN effect — waits for forked task result', async () => {
     function* child() {
       yield delay(20);
@@ -325,6 +304,50 @@ describe('runner', () => {
     const env = createEnv();
     const task = runSaga(saga, env);
     await expect(task.toPromise()).rejects.toThrow('unhandled');
+  });
+
+  it('forked task error propagates to parent', async () => {
+    function* child() {
+      yield delay(5);
+      throw new Error('child-boom');
+    }
+    function* saga() {
+      yield fork(child);
+      yield take('NEVER'); // parent blocks here
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    await expect(task.toPromise()).rejects.toThrow('child-boom');
+  });
+
+  it('spawned task error does NOT propagate to parent', async () => {
+    function* child() {
+      yield delay(5);
+      throw new Error('spawn-boom');
+    }
+    function* saga() {
+      yield spawn(child);
+      yield delay(50);
+      return 'parent-ok';
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    const result = await task.toPromise();
+    expect(result).toBe('parent-ok');
+  });
+
+  it('cancellation clears delay timer', async () => {
+    const timerSpy = vi.spyOn(global, 'clearTimeout');
+    function* saga() {
+      yield delay(10_000);
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    // Give the saga time to reach the delay effect
+    await new Promise((r) => setTimeout(r, 10));
+    task.cancel();
+    expect(timerSpy).toHaveBeenCalled();
+    timerSpy.mockRestore();
   });
 
   it('until throws when subscribe is not provided', async () => {

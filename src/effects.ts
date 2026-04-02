@@ -6,7 +6,6 @@ import {
   FORK,
   SPAWN,
   PUT,
-  PUT_RESOLVE,
   JOIN,
   CANCEL,
   CPS,
@@ -29,7 +28,6 @@ import {
   type ForkEffect,
   type SpawnEffect,
   type PutEffect,
-  type PutResolveEffect,
   type JoinEffect,
   type CancelEffect,
   type CpsEffect,
@@ -96,10 +94,6 @@ export function spawn<Saga extends SagaFn>(
 
 export function put(action: ActionEvent): PutEffect {
   return { type: PUT, action };
-}
-
-export function putResolve(action: ActionEvent): PutResolveEffect {
-  return { type: PUT_RESOLVE, action };
 }
 
 export function join<Result>(task: Task<Result>): JoinEffect<Result> {

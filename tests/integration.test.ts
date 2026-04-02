@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { sagas } from '../src/middleware';
 import { END } from '../src/channels';
@@ -304,6 +304,66 @@ describe('integration', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(result).toBe(true);
     store.sagaTask.cancel();
+  });
+
+  it('race: cancels delay timer when take wins', async () => {
+    const timerSpy = vi.spyOn(global, 'clearTimeout');
+    let result: Record<string, unknown> | undefined;
+
+    const store = createStore(
+      sagas(
+        function* ({ take, race, delay }) {
+          result = yield race({
+            action: take('fastAction'),
+            timeout: delay(10_000),
+          });
+        },
+        (set) => ({
+          fastAction: () => {},
+        }),
+      ),
+    );
+
+    store.getState().fastAction();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(result).toBeDefined();
+    expect(result!.action).toEqual({ type: 'fastAction', payload: undefined });
+    // The losing delay branch timer should have been cleared
+    expect(timerSpy).toHaveBeenCalled();
+    timerSpy.mockRestore();
+    store.sagaTask.cancel();
+  });
+
+  it('fork: unhandled child error propagates to parent saga', async () => {
+    let caughtError: string | undefined;
+
+    const store = createStore(
+      sagas(
+        function* ({ fork, delay, call }) {
+          function* failingChild() {
+            yield delay(5);
+            throw new Error('child-fail');
+          }
+
+          try {
+            yield fork(failingChild);
+            yield delay(100); // parent waits
+          } catch (e: any) {
+            // Fork errors cancel the parent and reject the task —
+            // they don't land in try/catch inside the saga.
+            // This catch should NOT execute.
+            caughtError = e.message;
+          }
+        },
+        (set) => ({}),
+      ),
+    );
+
+    // The saga task itself should reject
+    await expect(store.sagaTask.toPromise()).rejects.toThrow('child-fail');
+    // The error propagates by rejecting the parent, not via generator throw
+    expect(caughtError).toBeUndefined();
   });
 
   it('error handling in saga with try/catch', async () => {

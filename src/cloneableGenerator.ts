@@ -9,6 +9,14 @@ interface HistoryEntry {
   value: any;
 }
 
+/**
+ * Wraps a generator function so that the returned generator supports `.clone()`.
+ *
+ * **Warning:** Cloning works by replaying the full call history (every `.next()`,
+ * `.throw()`, `.return()`) on a fresh generator instance. If the generator
+ * function performs side effects before or between `yield` points, those side
+ * effects will re-execute on every clone.
+ */
 export function cloneableGenerator<Args extends any[], Result>(
   fn: (...args: Args) => Generator<Effect, Result, any>,
 ): (...args: Args) => CloneableGenerator<Result> {
