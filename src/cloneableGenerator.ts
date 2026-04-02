@@ -29,26 +29,29 @@ function makeCloneable<Args extends any[], Result>(
 
   const localHistory = [...history];
 
-  const cloneable: CloneableGenerator<Result> = {
-    next(value?: any) {
-      localHistory.push({ type: 'next', value });
-      return gen.next(value);
+  const cloneable: CloneableGenerator<Result> = Object.assign(
+    Object.create(Object.getPrototypeOf(gen)),
+    {
+      next(value?: any) {
+        localHistory.push({ type: 'next', value });
+        return gen.next(value);
+      },
+      throw(error?: any) {
+        localHistory.push({ type: 'throw', value: error });
+        return gen.throw(error);
+      },
+      return(value: Result) {
+        localHistory.push({ type: 'return', value });
+        return gen.return(value);
+      },
+      clone() {
+        return makeCloneable(fn, args, localHistory);
+      },
+      [Symbol.iterator]() {
+        return cloneable;
+      },
     },
-    throw(error?: any) {
-      localHistory.push({ type: 'throw', value: error });
-      return gen.throw(error);
-    },
-    return(value: Result) {
-      localHistory.push({ type: 'return', value });
-      return gen.return(value);
-    },
-    clone() {
-      return makeCloneable(fn, args, localHistory);
-    },
-    [Symbol.iterator]() {
-      return cloneable;
-    },
-  };
+  );
 
   return cloneable;
 }
