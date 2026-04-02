@@ -20,6 +20,7 @@ import {
   ALL_SETTLED,
   ACTION_CHANNEL,
   FLUSH,
+  RETRY,
   UNTIL,
   type TakeEffect,
   type TakeMaybeEffect,
@@ -44,6 +45,7 @@ import {
   type WorkerArgs,
   type ActionChannelEffect,
   type FlushEffect,
+  type RetryEffect,
   type UntilEffect,
   type ActionEvent,
   type ActionPattern,
@@ -138,25 +140,13 @@ export function flush<Value>(chan: Channel<Value>): FlushEffect<Value> {
   return { type: FLUSH, channel: chan };
 }
 
-export function retry<Args extends any[], Return>(
+export function retry<Fn extends (...args: any[]) => any>(
   maxTries: number,
   delayMs: number,
-  fn: (...args: Args) => Return,
-  ...args: Args
-): CallEffect {
-  return call(function* (): Generator<Effect> {
-    for (let i = 0; i < maxTries; i++) {
-      try {
-        return yield call(fn, ...args);
-      } catch (e) {
-        if (i < maxTries - 1) {
-          yield delay(delayMs);
-        } else {
-          throw e;
-        }
-      }
-    }
-  });
+  fn: Fn,
+  ...args: Parameters<Fn>
+): RetryEffect<Fn> {
+  return { type: RETRY, maxTries, delayMs, fn, args } as RetryEffect<Fn>;
 }
 
 export function callWorker<Fn extends WorkerFn>(

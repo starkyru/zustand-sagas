@@ -29,6 +29,7 @@ import {
   ALL_SETTLED,
   ACTION_CHANNEL,
   FLUSH,
+  RETRY,
   UNTIL,
   type Effect,
   type Task,
@@ -511,6 +512,25 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
       case FLUSH: {
         return effect.channel.flush();
+      }
+
+      case RETRY: {
+        for (let i = 0; i < effect.maxTries; i++) {
+          try {
+            const result = effect.fn(...effect.args);
+            if (isGenerator(result)) {
+              return await runGenerator(() => result as Generator<Effect, unknown, unknown>, []);
+            }
+            return await result;
+          } catch (e) {
+            if (i < effect.maxTries - 1) {
+              await new Promise((resolve) => setTimeout(resolve, effect.delayMs));
+            } else {
+              throw e;
+            }
+          }
+        }
+        break;
       }
 
       case UNTIL: {

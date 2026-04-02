@@ -16,18 +16,31 @@ describe('ActionChannel', () => {
     channel.emit({ type: 'nobodyListening' });
   });
 
-  it('resolves only the first matching taker', async () => {
+  it('multicasts to all matching takers', async () => {
     const channel = new ActionChannel();
     const { promise: p1 } = channel.take('doSomething');
     const { promise: p2 } = channel.take('doSomething');
 
     channel.emit({ type: 'doSomething', payload: 1 });
-    channel.emit({ type: 'doSomething', payload: 2 });
 
     const r1 = await p1;
     const r2 = await p2;
     expect(r1).toEqual({ type: 'doSomething', payload: 1 });
-    expect(r2).toEqual({ type: 'doSomething', payload: 2 });
+    expect(r2).toEqual({ type: 'doSomething', payload: 1 });
+  });
+
+  it('does not deliver to non-matching takers', async () => {
+    const channel = new ActionChannel();
+    const { promise: p1 } = channel.take('a');
+    const { promise: p2 } = channel.take('b');
+
+    channel.emit({ type: 'a', payload: 1 });
+    channel.emit({ type: 'b', payload: 2 });
+
+    const r1 = await p1;
+    const r2 = await p2;
+    expect(r1).toEqual({ type: 'a', payload: 1 });
+    expect(r2).toEqual({ type: 'b', payload: 2 });
   });
 
   it('supports predicate patterns', async () => {

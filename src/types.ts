@@ -62,6 +62,7 @@ export const CALL_WORKER_GEN: unique symbol = Symbol('CALL_WORKER_GEN');
 export const RACE: unique symbol = Symbol('RACE');
 export const ALL: unique symbol = Symbol('ALL');
 export const ALL_SETTLED: unique symbol = Symbol('ALL_SETTLED');
+export const RETRY: unique symbol = Symbol('RETRY');
 export const UNTIL: unique symbol = Symbol('UNTIL');
 
 export type TakeEffect<Value = any> =
@@ -200,6 +201,14 @@ export interface SettledRejected {
 
 export type SettledResult<T = unknown> = SettledFulfilled<T> | SettledRejected;
 
+export interface RetryEffect<Fn extends (...args: any[]) => any = (...args: any[]) => any> {
+  type: typeof RETRY;
+  maxTries: number;
+  delayMs: number;
+  fn: Fn;
+  args: Parameters<Fn>;
+}
+
 export interface UntilEffect {
   type: typeof UNTIL;
   predicate: string | ((state: unknown) => unknown);
@@ -228,6 +237,7 @@ export type Effect =
   | CallWorkerGenEffect
   | ActionChannelEffect
   | FlushEffect
+  | RetryEffect
   | UntilEffect;
 
 // --- Task ---

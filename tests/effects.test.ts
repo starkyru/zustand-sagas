@@ -7,9 +7,11 @@ import {
   spawn,
   cancel,
   delay,
+  retry,
   race,
   all,
   allSettled,
+  until,
 } from '../src/effects';
 import {
   TAKE,
@@ -19,9 +21,11 @@ import {
   SPAWN,
   CANCEL,
   DELAY,
+  RETRY,
   RACE,
   ALL,
   ALL_SETTLED,
+  UNTIL,
 } from '../src/types';
 
 describe('effect creators', () => {
@@ -111,5 +115,22 @@ describe('effect creators', () => {
     const effect = allSettled(effects);
     expect(effect.type).toBe(ALL_SETTLED);
     expect(effect.effects).toBe(effects);
+  });
+
+  it('retry creates a RetryEffect', () => {
+    const fn = (x: number) => x + 1;
+    const effect = retry(3, 100, fn, 5);
+    expect(effect).toEqual({ type: RETRY, maxTries: 3, delayMs: 100, fn, args: [5] });
+  });
+
+  it('until creates an UntilEffect with string predicate', () => {
+    const effect = until('ready');
+    expect(effect).toEqual({ type: UNTIL, predicate: 'ready', timeout: undefined });
+  });
+
+  it('until creates an UntilEffect with function predicate and timeout', () => {
+    const pred = (s: any) => s.count > 0;
+    const effect = until(pred, 5000);
+    expect(effect).toEqual({ type: UNTIL, predicate: pred, timeout: 5000 });
   });
 });

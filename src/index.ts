@@ -92,6 +92,7 @@ export type {
   RaceEffect,
   AllEffect,
   AllSettledEffect,
+  RetryEffect,
   UntilEffect,
   SettledResult,
   SettledFulfilled,

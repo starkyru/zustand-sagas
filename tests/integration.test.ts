@@ -366,6 +366,36 @@ describe('integration', () => {
     expect(caughtError).toBeUndefined();
   });
 
+  it('multicast: two takeEvery on same action both fire', async () => {
+    const log: string[] = [];
+
+    const store = createStore(
+      sagas(
+        function* ({ takeEvery, call }) {
+          yield takeEvery('ping', function* () {
+            yield call(() => log.push('worker1'));
+          });
+          yield takeEvery('ping', function* () {
+            yield call(() => log.push('worker2'));
+          });
+        },
+        (set) => ({
+          ping: () => {},
+        }),
+      ),
+    );
+
+    // Let both forks register their takers before emitting
+    await new Promise((r) => setTimeout(r, 0));
+    store.getState().ping();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(log).toContain('worker1');
+    expect(log).toContain('worker2');
+    expect(log).toHaveLength(2);
+    store.sagaTask.cancel();
+  });
+
   it('error handling in saga with try/catch', async () => {
     const store = createStore(
       sagas(

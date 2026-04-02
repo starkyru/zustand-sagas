@@ -19,11 +19,16 @@ export class ActionChannel {
   private nextSubId = 0;
 
   emit(action: ActionEvent): void {
-    // One-shot takers (existing behavior)
-    const index = this.takers.findIndex((t) => this.matches(t.pattern, action));
-    if (index !== -1) {
-      const taker = this.takers[index];
-      this.takers.splice(index, 1);
+    // Multicast to ALL matching one-shot takers (same action, all receive it)
+    const matched: number[] = [];
+    for (let i = 0; i < this.takers.length; i++) {
+      if (this.matches(this.takers[i].pattern, action)) {
+        matched.push(i);
+      }
+    }
+    for (let i = matched.length - 1; i >= 0; i--) {
+      const taker = this.takers[matched[i]];
+      this.takers.splice(matched[i], 1);
       taker.resolve(action);
     }
 
