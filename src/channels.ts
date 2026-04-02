@@ -172,20 +172,28 @@ export function multicastChannel<Item>(): Channel<Item> {
   return new MulticastChannelImpl<Item>();
 }
 
+class EventChannelImpl<Item> extends BasicChannel<Item> {
+  private unsubscribe: () => void;
+
+  constructor(
+    subscribe: (emitter: (input: Item | END) => void) => () => void,
+    buffer: Buffer<Item>,
+  ) {
+    super(buffer);
+    this.unsubscribe = subscribe((input) => {
+      this.put(input);
+    });
+  }
+
+  close(): void {
+    this.unsubscribe();
+    super.close();
+  }
+}
+
 export function eventChannel<Item>(
   subscribe: (emitter: (input: Item | END) => void) => () => void,
   buffer?: Buffer<Item>,
 ): Channel<Item> {
-  const chan = channel<Item>(buffer ?? buffers.expanding<Item>());
-  const unsubscribe = subscribe((input) => {
-    chan.put(input);
-  });
-
-  const originalClose = chan.close.bind(chan);
-  chan.close = () => {
-    unsubscribe();
-    originalClose();
-  };
-
-  return chan;
+  return new EventChannelImpl<Item>(subscribe, buffer ?? buffers.expanding<Item>());
 }

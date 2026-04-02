@@ -27,11 +27,14 @@ function wrapActions<State extends object>(
     if (typeof value === 'function' && !wrapped.has(value as (...args: any[]) => any)) {
       const original = value as (...args: any[]) => any;
       const wrapper = (...args: unknown[]) => {
+        // Run the original action first so state is updated,
+        // then emit so sagas always see fresh state via select().
+        const result = original(...args);
         channel.emit({
           type: key,
           payload: args.length === 0 ? undefined : args.length === 1 ? args[0] : args,
         });
-        return original(...args);
+        return result;
       };
       wrapped.add(wrapper);
       result[key] = wrapper;

@@ -113,5 +113,5 @@ export const buffers = {
   fixed: <Item>(limit = 10): Buffer<Item> => new FixedBuffer<Item>(limit),
   dropping: <Item>(limit: number): Buffer<Item> => new DroppingBuffer<Item>(limit),
   sliding: <Item>(limit: number): Buffer<Item> => new SlidingBuffer<Item>(limit),
-  expanding: <Item>(_initialSize = 10): Buffer<Item> => new ExpandingBuffer<Item>(),
+  expanding: <Item>(): Buffer<Item> => new ExpandingBuffer<Item>(),
 };

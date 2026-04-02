@@ -37,21 +37,23 @@ No `dispatch()`, no `{ type: 'ACTION' }` objects. Store function names **are** t
 
 ## How It Works
 
-`createSaga` wraps every function in your store state. When you call a store action like `increment(arg)`, two things happen:
+`createSaga` wraps every function in your store state. When you call a store action like `increment(arg)`, two things happen in order:
 
-1. An `ActionEvent` (`{ type: 'increment', payload: arg }`) is emitted on an internal channel
-2. The original function runs normally (state updates happen as usual)
+1. The original function runs normally (state updates via `set()`)
+2. An `ActionEvent` (`{ type: 'increment', payload: arg }`) is emitted on an internal channel
+
+The action runs **before** the event is emitted. This means state is always up to date when sagas react — a `select()` immediately after `take()` will see the state that the action just wrote.
 
 Sagas are generator functions that yield declarative effect descriptions. The runner interprets each effect, pausing the generator until the effect completes, then resuming it with the result.
 
 ```
 store.getState().increment(5)
         |
-        |---> emit { type: 'increment', payload: 5 }
-        |         |
-        |         '---> ActionChannel ---> take('increment') resolves ---> saga resumes
+        |---> original increment(5) runs ---> state updates via set()
         |
-        '---> original increment(5) runs ---> state updates via set()
+        '---> emit { type: 'increment', payload: 5 }
+                  |
+                  '---> ActionChannel ---> take('increment') resolves ---> saga resumes
 ```
 
 **Key design decisions:**
@@ -762,7 +764,7 @@ import { buffers } from 'zustand-sagas';
 | `buffers.fixed(limit?)`       | Throws on overflow (default limit: 10)               |
 | `buffers.dropping(limit)`     | Silently drops new items when full                   |
 | `buffers.sliding(limit)`      | Drops oldest item when full                          |
-| `buffers.expanding(initial?)` | Grows dynamically, never drops (default)             |
+| `buffers.expanding()`         | Grows dynamically, never drops (default)             |
 
 ```ts
 // Channel with a sliding window of 100 items

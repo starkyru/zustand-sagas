@@ -12,9 +12,10 @@ import {
   cps,
   delay,
   retry,
+  race,
   until,
 } from '../src/effects';
-import type { ActionEvent } from '../src/types';
+import type { Effect, ActionEvent } from '../src/types';
 
 function createEnv(state: Record<string, unknown> = {}): RunnerEnv {
   return {
@@ -349,6 +350,43 @@ describe('runner', () => {
     timerSpy.mockRestore();
   });
 
+  it('cancellation clears retry delay timer', async () => {
+    const timerSpy = vi.spyOn(global, 'clearTimeout');
+    function alwaysFails() {
+      throw new Error('fail');
+    }
+    function* saga(): Generator<any> {
+      yield retry(100, 10_000, alwaysFails);
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    // Give the saga time to fail once and enter the retry delay
+    await new Promise((r) => setTimeout(r, 20));
+    task.cancel();
+    expect(timerSpy).toHaveBeenCalled();
+    timerSpy.mockRestore();
+  });
+
+  it('retry stops retrying after cancellation', async () => {
+    let attempts = 0;
+    function alwaysFails() {
+      attempts++;
+      throw new Error('fail');
+    }
+    function* saga(): Generator<any> {
+      yield retry(100, 50, alwaysFails);
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    // Let it fail a couple times then cancel
+    await new Promise((r) => setTimeout(r, 80));
+    const attemptsAtCancel = attempts;
+    task.cancel();
+    // Wait to confirm no further attempts
+    await new Promise((r) => setTimeout(r, 150));
+    expect(attempts).toBe(attemptsAtCancel);
+  });
+
   it('until throws when subscribe is not provided', async () => {
     function* saga(): Generator<any> {
       yield until('ready');
@@ -356,5 +394,44 @@ describe('runner', () => {
     const env = createEnv();
     const task = runSaga(saga, env);
     await expect(task.toPromise()).rejects.toThrow('until effect requires a store subscription');
+  });
+
+  it('race cancels forked task when another branch wins', async () => {
+    let forkedRunning = true;
+    function* longRunning(): Generator<Effect, void, any> {
+      yield delay(10_000);
+      forkedRunning = false;
+    }
+    function* saga(): Generator<any> {
+      const result = yield race({
+        forked: fork(longRunning),
+        timeout: delay(20),
+      });
+      return result;
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    await task.toPromise();
+    // The forked task should have been cancelled by the race
+    expect(forkedRunning).toBe(true); // never reached forkedRunning = false
+  });
+
+  it('race cancels spawned task when another branch wins', async () => {
+    let spawnedRunning = true;
+    function* longRunning(): Generator<Effect, void, any> {
+      yield delay(10_000);
+      spawnedRunning = false;
+    }
+    function* saga(): Generator<any> {
+      const result = yield race({
+        spawned: spawn(longRunning),
+        timeout: delay(20),
+      });
+      return result;
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    await task.toPromise();
+    expect(spawnedRunning).toBe(true);
   });
 });

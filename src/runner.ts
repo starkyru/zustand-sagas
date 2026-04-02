@@ -58,9 +58,17 @@ function createWorkerExecution(
   let handle: WorkerHandle | null = null;
   let settled = false;
   let cancelRequested = false;
+  let graceTimerId: ReturnType<typeof setTimeout> | undefined;
+
+  const settle = () => {
+    settled = true;
+    if (graceTimerId !== undefined) {
+      clearTimeout(graceTimerId);
+      graceTimerId = undefined;
+    }
+  };
 
   const promise = (async () => {
-    // Try sync platform first (browser), fall back to async (Node.js)
     let platform;
     try {
       platform = getPlatform();
@@ -83,11 +91,11 @@ function createWorkerExecution(
     return new Promise<unknown>((resolve, reject) => {
       handle!.onMessage((data: any) => {
         if (data.type === 'result') {
-          settled = true;
+          settle();
           handle!.terminate();
           resolve(data.value);
         } else if (data.type === 'error') {
-          settled = true;
+          settle();
           handle!.terminate();
           const err = new Error(data.message);
           if (data.stack) err.stack = data.stack;
@@ -96,7 +104,7 @@ function createWorkerExecution(
       });
 
       handle!.onError((err) => {
-        settled = true;
+        settle();
         handle!.terminate();
         reject(err);
       });
@@ -111,7 +119,7 @@ function createWorkerExecution(
     cancelRequested = true;
     if (handle) {
       handle.postMessage({ type: 'cancel' });
-      setTimeout(() => handle!.terminate(), WORKER_GRACE_PERIOD_MS);
+      graceTimerId = setTimeout(() => handle!.terminate(), WORKER_GRACE_PERIOD_MS);
     }
   };
 
@@ -126,6 +134,15 @@ function createWorkerChannelExecution(
   let handle: WorkerHandle | null = null;
   let settled = false;
   let cancelRequested = false;
+  let graceTimerId: ReturnType<typeof setTimeout> | undefined;
+
+  const settle = () => {
+    settled = true;
+    if (graceTimerId !== undefined) {
+      clearTimeout(graceTimerId);
+      graceTimerId = undefined;
+    }
+  };
 
   const promise = (async () => {
     let platform;
@@ -153,12 +170,12 @@ function createWorkerChannelExecution(
         if (data.type === 'emit') {
           chan.put(data.value);
         } else if (data.type === 'result') {
-          settled = true;
+          settle();
           handle!.terminate();
           chan.close();
           resolve(data.value);
         } else if (data.type === 'error') {
-          settled = true;
+          settle();
           handle!.terminate();
           chan.close();
           reject(new Error(data.message));
@@ -166,7 +183,7 @@ function createWorkerChannelExecution(
       });
 
       handle!.onError((err) => {
-        settled = true;
+        settle();
         handle!.terminate();
         chan.close();
         reject(err);
@@ -183,60 +200,95 @@ function createWorkerChannelExecution(
     chan.close();
     if (handle) {
       handle.postMessage({ type: 'cancel' });
-      setTimeout(() => handle!.terminate(), WORKER_GRACE_PERIOD_MS);
+      graceTimerId = setTimeout(() => handle!.terminate(), WORKER_GRACE_PERIOD_MS);
     }
   };
 
   return { promise, cancel, channel: chan };
 }
 
-async function createWorkerGenExecution(
+function createWorkerGenExecution(
   fn: WorkerFn,
   handler: SagaFn,
   args: unknown[],
   runGenerator: (gen: SagaFn, genArgs: unknown[]) => Promise<unknown>,
-): Promise<unknown> {
-  let platform;
-  try {
-    platform = getPlatform();
-  } catch {
-    platform = await getPlatformAsync();
-  }
+): { promise: Promise<unknown>; cancel: () => void } {
+  let handle: WorkerHandle | null = null;
+  let settled = false;
+  let cancelRequested = false;
+  let graceTimerId: ReturnType<typeof setTimeout> | undefined;
 
-  let handle: WorkerHandle;
-  if (typeof fn === 'function') {
-    const code = buildWorkerCode(fn.toString(), 'gen');
-    handle = platform.createFromCode(code);
-  } else {
-    handle = platform.createFromURL(fn);
-  }
+  const settle = () => {
+    settled = true;
+    if (graceTimerId !== undefined) {
+      clearTimeout(graceTimerId);
+      graceTimerId = undefined;
+    }
+  };
 
-  return new Promise<unknown>((resolve, reject) => {
-    handle.onMessage(async (data: any) => {
-      if (data.type === 'send') {
-        try {
-          const response = await runGenerator(handler, [data.value]);
-          handle.postMessage({ type: 'response', value: response });
-        } catch (e: any) {
-          handle.terminate();
-          reject(e);
-        }
-      } else if (data.type === 'result') {
-        handle.terminate();
-        resolve(data.value);
-      } else if (data.type === 'error') {
-        handle.terminate();
-        reject(new Error(data.message));
-      }
-    });
+  const promise = (async () => {
+    let platform;
+    try {
+      platform = getPlatform();
+    } catch {
+      platform = await getPlatformAsync();
+    }
 
-    handle.onError((err) => {
+    if (typeof fn === 'function') {
+      const code = buildWorkerCode(fn.toString(), 'gen');
+      handle = platform.createFromCode(code);
+    } else {
+      handle = platform.createFromURL(fn);
+    }
+
+    if (cancelRequested) {
       handle.terminate();
-      reject(err);
-    });
+      return undefined;
+    }
 
-    handle.postMessage({ type: 'exec', args });
-  });
+    return new Promise<unknown>((resolve, reject) => {
+      handle!.onMessage(async (data: any) => {
+        if (data.type === 'send') {
+          try {
+            const response = await runGenerator(handler, [data.value]);
+            handle!.postMessage({ type: 'response', value: response });
+          } catch (e: any) {
+            settle();
+            handle!.terminate();
+            reject(e);
+          }
+        } else if (data.type === 'result') {
+          settle();
+          handle!.terminate();
+          resolve(data.value);
+        } else if (data.type === 'error') {
+          settle();
+          handle!.terminate();
+          reject(new Error(data.message));
+        }
+      });
+
+      handle!.onError((err) => {
+        settle();
+        handle!.terminate();
+        reject(err);
+      });
+
+      handle!.postMessage({ type: 'exec', args });
+    });
+  })();
+
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    cancelRequested = true;
+    if (handle) {
+      handle.postMessage({ type: 'cancel' });
+      graceTimerId = setTimeout(() => handle!.terminate(), WORKER_GRACE_PERIOD_MS);
+    }
+  };
+
+  return { promise, cancel };
 }
 
 export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task {
@@ -355,7 +407,12 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       }
 
       case CALL: {
-        const callResult = effect.fn(...effect.args);
+        let callResult: unknown;
+        try {
+          callResult = effect.fn(...effect.args);
+        } catch (err) {
+          return { promise: Promise.reject(err), cancel: () => {} };
+        }
         if (isGenerator(callResult)) {
           const childTask = runSaga(() => callResult as Generator<Effect, unknown, unknown>, env);
           return {
@@ -364,6 +421,24 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
           };
         }
         return { promise: Promise.resolve(callResult), cancel: () => {} };
+      }
+
+      case FORK: {
+        const childTask = runSaga(effect.saga, env, ...effect.args);
+        trackChild(childTask);
+        return {
+          promise: Promise.resolve(childTask),
+          cancel: () => childTask.cancel(),
+        };
+      }
+
+      case SPAWN: {
+        const childTask = runSaga(effect.saga, env, ...effect.args);
+        childTask.toPromise().catch(() => {});
+        return {
+          promise: Promise.resolve(childTask),
+          cancel: () => childTask.cancel(),
+        };
       }
 
       default:
@@ -410,18 +485,20 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
       case FORK: {
         const childTask = runSaga(effect.saga, env, ...effect.args);
-        trackChild(childTask);
-        // Propagate unhandled errors from forked children to the parent
-        // (unless the child was joined, in which case the joiner handles the error)
-        childTask.toPromise().catch((err) => {
-          if (!childTask.isCancelled() && !joinedTasks.has(childTask) && rejectParent) {
-            cancelFlag = true;
-            for (const child of children) {
-              if (child !== childTask) child.cancel();
+        children.add(childTask);
+        childTask.toPromise().then(
+          () => children.delete(childTask),
+          (err) => {
+            children.delete(childTask);
+            if (!childTask.isCancelled() && !joinedTasks.has(childTask) && rejectParent) {
+              cancelFlag = true;
+              for (const child of children) {
+                if (child !== childTask) child.cancel();
+              }
+              rejectParent(err);
             }
-            rejectParent(err);
-          }
-        });
+          },
+        );
         return childTask;
       }
 
@@ -470,8 +547,9 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       }
 
       case CALL_WORKER: {
-        const { promise: workerPromise } = createWorkerExecution(effect.fn, effect.args);
-        return workerPromise;
+        const execution = createWorkerExecution(effect.fn, effect.args);
+        const removeCleanup = addCleanup(execution.cancel);
+        return execution.promise.finally(removeCleanup);
       }
 
       case FORK_WORKER: {
@@ -498,7 +576,14 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       }
 
       case CALL_WORKER_GEN: {
-        return createWorkerGenExecution(effect.fn, effect.handler!, effect.args, runGenerator);
+        const execution = createWorkerGenExecution(
+          effect.fn,
+          effect.handler!,
+          effect.args,
+          runGenerator,
+        );
+        const removeCleanup = addCleanup(execution.cancel);
+        return execution.promise.finally(removeCleanup);
       }
 
       case ACTION_CHANNEL: {
@@ -524,7 +609,17 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
             return await result;
           } catch (e) {
             if (i < effect.maxTries - 1) {
-              await new Promise((resolve) => setTimeout(resolve, effect.delayMs));
+              await new Promise<void>((resolve) => {
+                const timerId = setTimeout(() => {
+                  removeCleanup();
+                  resolve();
+                }, effect.delayMs);
+                const removeCleanup = addCleanup(() => {
+                  clearTimeout(timerId);
+                  resolve();
+                });
+              });
+              if (cancelFlag) return undefined;
             } else {
               throw e;
             }
@@ -611,8 +706,22 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       }
 
       case ALL: {
-        const results = await Promise.all(effect.effects.map((eff) => processEffect(eff)));
-        return results;
+        const branches = effect.effects.map((eff) => {
+          try {
+            return processEffectCancellable(eff);
+          } catch (err) {
+            return { promise: Promise.reject(err), cancel: () => {} } as Cancellable;
+          }
+        });
+
+        try {
+          const results = await Promise.all(branches.map((b) => b.promise));
+          return results;
+        } catch (err) {
+          // Cancel remaining effects when one fails
+          for (const branch of branches) branch.cancel();
+          throw err;
+        }
       }
 
       case ALL_SETTLED: {

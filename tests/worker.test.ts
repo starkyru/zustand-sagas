@@ -50,6 +50,23 @@ describe('callWorker', () => {
     expect(result).toBe(42);
   });
 
+  it('cancelling saga terminates a blocking callWorker', async () => {
+    function* saga() {
+      // Worker that takes a long time
+      yield callWorker(async () => {
+        await new Promise((r) => setTimeout(r, 10_000));
+        return 'done';
+      });
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    // Give worker time to start
+    await new Promise((r) => setTimeout(r, 50));
+    expect(task.isRunning()).toBe(true);
+    task.cancel();
+    expect(task.isCancelled()).toBe(true);
+  });
+
   it('propagates errors from worker to saga try/catch', async () => {
     function* saga() {
       try {

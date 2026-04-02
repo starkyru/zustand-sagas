@@ -196,6 +196,36 @@ describe('integration', () => {
     store.sagaTask.cancel();
   });
 
+  it('all: cancels remaining effects when one fails', async () => {
+    const timerSpy = vi.spyOn(global, 'clearTimeout');
+    let caughtError: string | undefined;
+
+    const store = createStore(
+      sagas(
+        function* ({ all, delay, call }) {
+          try {
+            yield all([
+              delay(10_000), // should be cancelled when call throws
+              call(() => {
+                throw new Error('all-boom');
+              }),
+            ]);
+          } catch (e: any) {
+            caughtError = e.message;
+          }
+        },
+        (_set) => ({}),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(caughtError).toBe('all-boom');
+    // The delay timer should have been cancelled
+    expect(timerSpy).toHaveBeenCalled();
+    timerSpy.mockRestore();
+    store.sagaTask.cancel();
+  });
+
   it('until: resolves immediately when predicate is already true (string key)', async () => {
     let resolved = false;
 
