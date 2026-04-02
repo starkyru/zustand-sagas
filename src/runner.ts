@@ -30,6 +30,7 @@ import {
   ALL_SETTLED,
   ACTION_CHANNEL,
   FLUSH,
+  UNTIL,
   type Effect,
   type Task,
   type SagaFn,
@@ -39,6 +40,7 @@ import {
 export interface RunnerEnv {
   channel: ActionChannel;
   getState: () => unknown;
+  subscribe?: (listener: (state: unknown, prevState: unknown) => void) => () => void;
 }
 
 const TERMINATE = Symbol('TERMINATE');
@@ -404,6 +406,43 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
       case FLUSH: {
         return effect.channel.flush();
+      }
+
+      case UNTIL: {
+        if (!env.subscribe) {
+          throw new Error(
+            'until effect requires a store subscription. Pass subscribe to RunnerEnv or use createSaga.',
+          );
+        }
+
+        const selector =
+          typeof effect.predicate === 'string'
+            ? (state: unknown) => (state as Record<string, unknown>)[effect.predicate as string]
+            : effect.predicate;
+
+        // Check immediately
+        if (selector(env.getState())) {
+          return true;
+        }
+
+        return new Promise<true | typeof END>((resolve) => {
+          let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+          const unsubscribe = env.subscribe!((state) => {
+            if (selector(state)) {
+              if (timeoutId !== undefined) clearTimeout(timeoutId);
+              unsubscribe();
+              resolve(true);
+            }
+          });
+
+          if (effect.timeout !== undefined) {
+            timeoutId = setTimeout(() => {
+              unsubscribe();
+              resolve(END);
+            }, effect.timeout);
+          }
+        });
       }
 
       case RACE: {

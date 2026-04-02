@@ -22,6 +22,7 @@ import {
   actionChannel as untypedActionChannel,
   flush,
   allSettled,
+  until as untypedUntil,
 } from './effects';
 import {
   takeEvery as untypedTakeEvery,
@@ -42,6 +43,7 @@ import type {
   ForkEffect,
   ActionChannelEffect,
   FlushEffect,
+  UntilEffect,
   Effect,
   ActionEvent,
 } from './types';
@@ -111,6 +113,9 @@ export interface SagaApi<State> {
     args: ActionArgs<State, Key>,
   ): PutResolveEffect;
 
+  until<Key extends string & keyof State>(predicate: Key, timeout?: number): UntilEffect;
+  until(predicate: (state: State) => unknown, timeout?: number): UntilEffect;
+
   // Pass-through effects (no action name involved)
   call: typeof call;
   select<Result>(selector: (state: State) => Result): SelectEffect;
@@ -157,6 +162,7 @@ export function createSagaApi<State>(): SagaApi<State> {
       putResolve(argsToAction(type, args))) as SagaApi<State>['putResolve'],
     putResolveApply: (<Key extends ActionNames<State>>(type: Key, args: ActionArgs<State, Key>) =>
       putResolve(argsToAction(type, args as unknown[]))) as SagaApi<State>['putResolveApply'],
+    until: untypedUntil as SagaApi<State>['until'],
     call,
     select: select as SagaApi<State>['select'],
     fork,

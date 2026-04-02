@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { sagas } from '../src/middleware';
+import { END } from '../src/channels';
 import type { ActionEvent } from '../src/types';
 
 describe('integration', () => {
@@ -192,6 +193,116 @@ describe('integration', () => {
       { status: 'fulfilled', value: 'ok' },
       { status: 'rejected', reason: new Error('boom') },
     ]);
+    store.sagaTask.cancel();
+  });
+
+  it('until: resolves immediately when predicate is already true (string key)', async () => {
+    let resolved = false;
+
+    const store = createStore(
+      sagas(
+        function* ({ until }) {
+          yield until('ready');
+          resolved = true;
+        },
+        (set) => ({
+          ready: true,
+        }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(true);
+    store.sagaTask.cancel();
+  });
+
+  it('until: waits for state change with string key', async () => {
+    let resolved = false;
+
+    const store = createStore(
+      sagas(
+        function* ({ until }) {
+          yield until('ready');
+          resolved = true;
+        },
+        (set) => ({
+          ready: false,
+          setReady: () => set((s) => ({ ...s, ready: true })),
+        }),
+      ),
+    );
+
+    expect(resolved).toBe(false);
+    store.getState().setReady();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(true);
+    store.sagaTask.cancel();
+  });
+
+  it('until: waits for state change with selector function', async () => {
+    let resolved = false;
+
+    const store = createStore(
+      sagas(
+        function* ({ until }) {
+          yield until((s: any) => s.count >= 3);
+          resolved = true;
+        },
+        (set) => ({
+          count: 0,
+          increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+        }),
+      ),
+    );
+
+    expect(resolved).toBe(false);
+    store.getState().increment();
+    store.getState().increment();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(false);
+    store.getState().increment();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resolved).toBe(true);
+    store.sagaTask.cancel();
+  });
+
+  it('until: returns END on timeout', async () => {
+    let result: unknown;
+
+    const store = createStore(
+      sagas(
+        function* ({ until }) {
+          result = yield until('ready', 30);
+        },
+        (set) => ({
+          ready: false,
+        }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 60));
+    expect(result).toBe(END);
+    store.sagaTask.cancel();
+  });
+
+  it('until: resolves before timeout when predicate becomes true', async () => {
+    let result: unknown;
+
+    const store = createStore(
+      sagas(
+        function* ({ until }) {
+          result = yield until('ready', 500);
+        },
+        (set) => ({
+          ready: false,
+          setReady: () => set((s) => ({ ...s, ready: true })),
+        }),
+      ),
+    );
+
+    store.getState().setReady();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result).toBe(true);
     store.sagaTask.cancel();
   });
 

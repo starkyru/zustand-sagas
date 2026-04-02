@@ -21,6 +21,7 @@ import {
   ALL_SETTLED,
   ACTION_CHANNEL,
   FLUSH,
+  UNTIL,
   type TakeEffect,
   type TakeMaybeEffect,
   type CallEffect,
@@ -45,6 +46,7 @@ import {
   type WorkerArgs,
   type ActionChannelEffect,
   type FlushEffect,
+  type UntilEffect,
   type ActionEvent,
   type ActionPattern,
   type Task,
@@ -189,6 +191,13 @@ export function forkWorkerChannel<Fn extends WorkerFn>(
   ...args: WorkerArgs<Fn>
 ): ForkWorkerChannelEffect<Fn> {
   return { type: FORK_WORKER_CHANNEL, fn, args } as ForkWorkerChannelEffect<Fn>;
+}
+
+export function until(
+  predicate: string | ((state: unknown) => unknown),
+  timeout?: number,
+): UntilEffect {
+  return { type: UNTIL, predicate, timeout };
 }
 
 export function callWorkerGen<Fn extends WorkerFn>(

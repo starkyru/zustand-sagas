@@ -63,6 +63,7 @@ export const CALL_WORKER_GEN: unique symbol = Symbol('CALL_WORKER_GEN');
 export const RACE: unique symbol = Symbol('RACE');
 export const ALL: unique symbol = Symbol('ALL');
 export const ALL_SETTLED: unique symbol = Symbol('ALL_SETTLED');
+export const UNTIL: unique symbol = Symbol('UNTIL');
 
 export interface TakeEffect<Value = any> {
   type: typeof TAKE;
@@ -209,6 +210,12 @@ export interface SettledRejected {
 
 export type SettledResult<T = unknown> = SettledFulfilled<T> | SettledRejected;
 
+export interface UntilEffect {
+  type: typeof UNTIL;
+  predicate: string | ((state: unknown) => unknown);
+  timeout?: number;
+}
+
 export type Effect =
   | TakeEffect
   | TakeMaybeEffect
@@ -231,7 +238,8 @@ export type Effect =
   | ForkWorkerChannelEffect
   | CallWorkerGenEffect
   | ActionChannelEffect
-  | FlushEffect;
+  | FlushEffect
+  | UntilEffect;
 
 // --- Task ---
 

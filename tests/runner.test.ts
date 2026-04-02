@@ -14,6 +14,7 @@ import {
   cps,
   delay,
   retry,
+  until,
 } from '../src/effects';
 import type { Effect, ActionEvent } from '../src/types';
 
@@ -324,5 +325,14 @@ describe('runner', () => {
     const env = createEnv();
     const task = runSaga(saga, env);
     await expect(task.toPromise()).rejects.toThrow('unhandled');
+  });
+
+  it('until throws when subscribe is not provided', async () => {
+    function* saga(): Generator<any> {
+      yield until('ready');
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+    await expect(task.toPromise()).rejects.toThrow('until effect requires a store subscription');
   });
 });

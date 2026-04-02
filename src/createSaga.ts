@@ -88,6 +88,9 @@ export function createSaga<State>(
   const env = {
     channel,
     getState: store.getState as () => unknown,
+    subscribe: store.subscribe as (
+      listener: (state: unknown, prevState: unknown) => void,
+    ) => () => void,
   };
 
   const task = runSaga((() => rootSaga(api)) as SagaFn, env) as Task<void>;

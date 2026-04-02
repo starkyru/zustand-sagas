@@ -561,6 +561,32 @@ function* saga({ allSettled, call }) {
 }
 ```
 
+#### `until(predicate, timeout?)`
+
+Pauses the saga until a store state predicate becomes truthy. Resolves immediately if the predicate is already satisfied. Returns `true` when the predicate passes, or `END` if the timeout expires.
+
+- `predicate: string` — a key of the store state; checks `state[key]` for truthiness
+- `predicate: (state) => unknown` — a selector function; checks the return value for truthiness
+- `timeout?: number` — optional milliseconds; if the predicate hasn't been satisfied by then, yields `END`
+
+```ts
+function* saga({ until }) {
+  // Wait for a boolean flag (string key)
+  yield until('ready');
+
+  // Wait for a computed condition (selector function)
+  yield until((s) => s.count >= 10);
+
+  // With timeout — returns END if not ready within 5s
+  const result = yield until('ready', 5000);
+  if (result === END) {
+    console.log('timed out waiting for ready');
+  }
+}
+```
+
+Via the typed `SagaApi`, the string overload only accepts valid keys of your store state (not just function names — any key). The selector overload receives the full typed state.
+
 #### `actionChannel(pattern, buffer?)`
 
 Creates a buffered channel that queues store actions matching `pattern`. Use with `take(channel)` to process actions sequentially with backpressure.
@@ -1227,6 +1253,7 @@ Both libraries share the same generator-based mental model:
 - **`cancel`** / **`join`** — task lifecycle control
 - **`delay`** / **`retry`** — timing utilities
 - **`race` / `all` / `allSettled`** — concurrency combinators
+- **`until`** — wait for a store state predicate to become truthy
 - **`takeEvery`, `takeLatest`, `takeLeading`, `debounce`, `throttle`** — high-level watcher patterns
 - **`channel`, `eventChannel`, `actionChannel`** — buffered channels and external event sources
 - **`END`** — channel termination signal
@@ -1395,6 +1422,7 @@ import type {
   JoinEffect,          // JoinEffect<Result> — generic over task result type
   CancelEffect,        // CancelEffect<Result>
   FlushEffect,         // FlushEffect<Value>
+  UntilEffect,         // until effect type
   Task,                // Task<Result> — generic over result type
   Saga,                // User-facing saga generator type: Generator<Effect, Result, any>
   SagaFn,
