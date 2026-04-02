@@ -770,6 +770,105 @@ function* rootSaga({ throttle }) {
 }
 ```
 
+### Async Slice
+
+Helpers for the common pattern of fetching an async resource: data, loading state, error, and actions — all derived from a single name.
+
+#### `AsyncSlice<Name, T, Args>`
+
+A mapped type that expands a resource name into typed state and action properties:
+
+```ts
+import type { AsyncSlice } from 'zustand-sagas';
+
+type UserSlice = AsyncSlice<'user', User, [id: string]>;
+// Expands to:
+// {
+//   user: User | null;
+//   userLoading: boolean;
+//   userError: string | null;
+//   fetchUser: (id: string) => void;
+//   setUser: (data: User) => void;
+//   setUserError: (error: string) => void;
+//   resetUser: () => void;
+// }
+```
+
+#### `createAsyncSlice(name, set)`
+
+Creates the initial state and actions for an async resource. Spread into your store's state creator.
+
+```ts
+import { createStore } from 'zustand/vanilla';
+import { createAsyncSlice, type AsyncSlice } from 'zustand-sagas';
+
+type Store = AsyncSlice<'user', User, [id: string]>;
+
+const store = createStore<Store>((set) => ({
+  ...createAsyncSlice<'user', User, [id: string]>('user', set),
+}));
+
+// State: store.getState().user, .userLoading, .userError
+// Actions: .fetchUser(id), .setUser(data), .setUserError(msg), .resetUser()
+```
+
+#### `createAsyncSaga(store, name, fetchFn)`
+
+Creates a saga that watches `fetchX` actions (via `takeLatest`) and handles the full lifecycle:
+
+1. On `fetchX` — calls `fetchFn` with the action payload
+2. On success — calls `setX(data)`
+3. On failure — calls `setXError(message)`
+
+Stale requests are automatically cancelled (takeLatest).
+
+```ts
+import { createSaga, createAsyncSlice, createAsyncSaga, type AsyncSlice } from 'zustand-sagas';
+
+async function fetchUser(id: string): Promise<User> {
+  const res = await fetch(`/api/users/${id}`);
+  return res.json();
+}
+
+type Store = AsyncSlice<'user', User, [id: string]>;
+
+const store = createStore<Store>((set) => ({
+  ...createAsyncSlice<'user', User, [id: string]>('user', set),
+}));
+
+const userSaga = createAsyncSaga(store, 'user', fetchUser);
+
+createSaga(store, function* (api) {
+  yield* userSaga(api);
+});
+
+// Trigger from anywhere:
+store.getState().fetchUser('123');
+// → userLoading: true
+// → (on success) user: { id: '123', ... }, userLoading: false
+// → (on failure) userError: 'Not found', userLoading: false
+```
+
+Multiple async slices compose naturally:
+
+```ts
+type Store = AsyncSlice<'user', User, [id: string]> &
+  AsyncSlice<'posts', Post[], [userId: string]>;
+
+const store = createStore<Store>((set) => ({
+  ...createAsyncSlice<'user', User, [id: string]>('user', set),
+  ...createAsyncSlice<'posts', Post[], [userId: string]>('posts', set),
+}));
+
+const userSaga = createAsyncSaga(store, 'user', fetchUser);
+const postsSaga = createAsyncSaga(store, 'posts', fetchPosts);
+
+createSaga(store, function* (api) {
+  yield* userSaga(api);
+  yield* postsSaga(api);
+});
+```
+
 ### Task
 
 Tasks are returned by `fork`, `spawn`, and `runSaga`. They represent a running saga and provide control over its lifecycle.
@@ -1283,6 +1382,7 @@ import type {
   CallWorkerGenEffect,      // callWorkerGen effect type
   MockTask,            // createMockTask return type (Task + setters)
   CloneableGenerator,  // Cloneable generator for testing
+  AsyncSlice,          // Mapped type for async resource state + actions
   StoreSagas,
   RunnerEnv,
 } from 'zustand-sagas';
