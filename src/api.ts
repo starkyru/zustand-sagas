@@ -107,7 +107,7 @@ export interface SagaApi<State> {
 
   // Pass-through effects (no action name involved)
   call: typeof call;
-  select<Result>(selector: (state: State) => Result): SelectEffect;
+  select<Result>(selector: (state: State) => Result): SelectEffect<Result>;
   select(): SelectEffect;
   fork: typeof fork;
   spawn: typeof spawn;

@@ -89,9 +89,9 @@ export interface CallEffect<Fn extends (...args: any[]) => any = (...args: any[]
   args: Parameters<Fn>;
 }
 
-export interface SelectEffect {
+export interface SelectEffect<Result = unknown> {
   type: typeof SELECT;
-  selector?: (state: unknown) => unknown;
+  selector?: (state: any) => Result;
 }
 
 export interface ForkEffect<Saga extends SagaFn = SagaFn> {

@@ -77,7 +77,7 @@ export function call<Fn extends (...args: any[]) => any>(
   return { type: CALL, fn, args } as CallEffect<Fn>;
 }
 
-export function select(selector?: (state: unknown) => unknown): SelectEffect {
+export function select<Result>(selector?: (state: any) => Result): SelectEffect<Result> {
   return { type: SELECT, selector };
 }
 
