@@ -77,7 +77,7 @@ store.getState().increment(5)
 
 ### `createSaga(store, rootSaga)`
 
-Attaches sagas to an existing Zustand store. Returns a `useSaga` function for accessing typed effects in child sagas.
+Attaches sagas to an existing Zustand store. Returns a `useSaga` function for accessing typed effects in child sagas. When the saga task completes or is cancelled, `createSaga` restores the store's original `setState` — safe for tests and re-attachment.
 
 ```ts
 import { createStore } from 'zustand/vanilla';
@@ -1414,12 +1414,14 @@ Effect types are generic where it matters:
 
 | Effect                   | Generic            | Preserves                         |
 |--------------------------|--------------------|-----------------------------------|
-| `TakeEffect<Value>`      | Channel value type | `take(channel)` keeps `Value`     |
-| `TakeMaybeEffect<Value>` | Channel value type | Same                              |
-| `JoinEffect<Result>`     | Task result type   | `join(task)` keeps `Result`       |
-| `CancelEffect<Result>`   | Task result type   | `cancel(task)` keeps `Result`     |
-| `FlushEffect<Value>`     | Channel value type | `flush(channel)` keeps `Value`    |
-| `Task<Result>`           | Result type        | `fork`/`spawn` return typed tasks |
+| `TakeEffect<Value>`      | Channel value type  | `take(channel)` keeps `Value`     |
+| `TakeMaybeEffect<Value>` | Channel value type  | Same                              |
+| `SelectEffect<Result>`   | Selector return type| `select(s => s.count)` keeps type |
+| `JoinEffect<Result>`     | Task result type    | `join(task)` keeps `Result`       |
+| `CancelEffect<Result>`   | Task result type    | `cancel(task)` keeps `Result`     |
+| `FlushEffect<Value>`     | Channel value type  | `flush(channel)` keeps `Value`    |
+| `RetryEffect<Fn>`        | Function type       | Preserves fn signature            |
+| `Task<Result>`           | Result type         | `fork`/`spawn` return typed tasks |
 
 All generics have defaults, so unparameterized usage (`TakeEffect`, `JoinEffect`, etc.) works unchanged.
 
@@ -1444,6 +1446,8 @@ import type {
   JoinEffect,          // JoinEffect<Result> — generic over task result type
   CancelEffect,        // CancelEffect<Result>
   FlushEffect,         // FlushEffect<Value>
+  SelectEffect,        // SelectEffect<Result> — generic over selector return type
+  RetryEffect,         // RetryEffect<Fn> — first-class retry effect
   UntilEffect,         // until effect type
   Task,                // Task<Result> — generic over result type
   Saga,                // User-facing saga generator type: Generator<Effect, Result, any>
