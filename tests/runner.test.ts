@@ -396,6 +396,23 @@ describe('runner', () => {
     await expect(task.toPromise()).rejects.toThrow('until effect requires a store subscription');
   });
 
+  it('cancellation unblocks a pending take and removes the taker', async () => {
+    function* saga(): Generator<any> {
+      yield take('PING');
+      return 'done';
+    }
+    const env = createEnv();
+    const task = runSaga(saga, env);
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect((env.channel as any).takers).toHaveLength(1);
+
+    task.cancel();
+    await expect(task.toPromise()).resolves.toBeUndefined();
+
+    expect((env.channel as any).takers).toHaveLength(0);
+  });
+
   it('race cancels forked task when another branch wins', async () => {
     let forkedRunning = true;
     function* longRunning(): Generator<Effect, void, any> {

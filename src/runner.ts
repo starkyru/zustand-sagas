@@ -296,6 +296,7 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
   const children = new Set<Task>();
   const pendingCleanups = new Set<() => void>();
   const joinedTasks = new WeakSet<Task>();
+  let finalized = false;
 
   // Reject handle for propagating forked-child errors to the parent
   let rejectParent: ((error: unknown) => void) | undefined;
@@ -303,12 +304,13 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
   const promise = new Promise<unknown>((resolve, reject) => {
     rejectParent = reject;
     runGenerator(saga, args).then(resolve, reject);
+  }).finally(() => {
+    finalize();
   });
 
   const task = createTask(promise, () => {
     cancelFlag = true;
-    for (const cleanup of pendingCleanups) cleanup();
-    pendingCleanups.clear();
+    finalize();
     for (const child of children) {
       child.cancel();
     }
@@ -319,6 +321,13 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
   function addCleanup(fn: () => void): () => void {
     pendingCleanups.add(fn);
     return () => pendingCleanups.delete(fn);
+  }
+
+  function finalize(): void {
+    if (finalized) return;
+    finalized = true;
+    for (const cleanup of pendingCleanups) cleanup();
+    pendingCleanups.clear();
   }
 
   function trackChild(childTask: Task): void {
@@ -450,24 +459,60 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
     switch (effect.type) {
       case TAKE: {
         if (effect.channel) {
-          const { promise: chanPromise } = effect.channel.take();
-          const value = await chanPromise;
+          const { promise: chanPromise, cancel: cancelTake } = effect.channel.take();
+          const value = await new Promise<unknown>((resolve) => {
+            const removeCleanup = addCleanup(() => {
+              cancelTake();
+              resolve(TERMINATE);
+            });
+            chanPromise.then((result) => {
+              removeCleanup();
+              resolve(result);
+            });
+          });
           if (value === END) {
             return TERMINATE;
           }
           return value;
         }
-        const { promise: takePromise } = env.channel.take(effect.pattern!);
-        return takePromise;
+        const { promise: takePromise, takerId } = env.channel.take(effect.pattern!);
+        return new Promise<unknown>((resolve) => {
+          const removeCleanup = addCleanup(() => {
+            env.channel.removeTaker(takerId);
+            resolve(TERMINATE);
+          });
+          takePromise.then((result) => {
+            removeCleanup();
+            resolve(result);
+          });
+        });
       }
 
       case TAKE_MAYBE: {
         if (effect.channel) {
-          const { promise: chanPromise } = effect.channel.take();
-          return chanPromise;
+          const { promise: chanPromise, cancel: cancelTake } = effect.channel.take();
+          return new Promise<unknown>((resolve) => {
+            const removeCleanup = addCleanup(() => {
+              cancelTake();
+              resolve(TERMINATE);
+            });
+            chanPromise.then((result) => {
+              removeCleanup();
+              resolve(result);
+            });
+          });
         }
-        const { promise: takePromise } = env.channel.take(effect.pattern!);
-        return takePromise;
+        const { promise: takePromise, takerId } = env.channel.take(effect.pattern!);
+        return new Promise<unknown>((resolve) => {
+          const removeCleanup = addCleanup(() => {
+            env.channel.removeTaker(takerId);
+            resolve(TERMINATE);
+          });
+          takePromise.then((result) => {
+            removeCleanup();
+            resolve(result);
+          });
+        });
       }
 
       case CALL: {

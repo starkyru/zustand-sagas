@@ -126,6 +126,28 @@ describe('createSaga', () => {
     expect(useSaga.task.isCancelled()).toBe(true);
   });
 
+  it('restores store.setState after saga cancellation', async () => {
+    const store = createStore<{
+      count: number;
+      increment: () => void;
+    }>((set) => ({
+      count: 0,
+      increment: () => set((s) => ({ ...s, count: s.count + 1 })),
+    }));
+
+    const originalSetState = store.setState;
+    const useSaga = createSaga(store, function* ({ take }) {
+      yield take('increment');
+    });
+
+    expect(store.setState).not.toBe(originalSetState);
+
+    useSaga.task.cancel();
+    await useSaga.task.toPromise();
+
+    expect(store.setState).toBe(originalSetState);
+  });
+
   it('works with async side effects', async () => {
     const store = createStore<{
       data: string | null;

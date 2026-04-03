@@ -47,9 +47,9 @@ function interceptSetState<State>(
   store: StoreApi<State>,
   channel: ActionChannel,
   wrapped: WeakSet<(...args: any[]) => any>,
-): void {
-  const originalSetState = store.setState.bind(store) as typeof store.setState;
-  store.setState = ((
+): () => void {
+  const originalSetState = store.setState;
+  const wrappedSetState = ((
     partial: State | Partial<State> | ((state: State) => State | Partial<State>),
     replace?: boolean,
   ) => {
@@ -73,6 +73,14 @@ function interceptSetState<State>(
       originalSetState(partial as State, replace as false);
     }
   }) as typeof store.setState;
+
+  store.setState = wrappedSetState;
+
+  return () => {
+    if (store.setState === wrappedSetState) {
+      store.setState = originalSetState;
+    }
+  };
 }
 
 export type RootSagaFn<State> = (api: SagaApi<State>) => Generator<Effect, unknown, unknown>;
@@ -90,7 +98,7 @@ export function createSaga<State>(
   const wrapped = new WeakSet<(...args: any[]) => any>();
 
   // Intercept setState to wrap new functions
-  interceptSetState(store, channel, wrapped);
+  const restoreSetState = interceptSetState(store, channel, wrapped);
 
   // Wrap functions already in the store
   const currentState = store.getState();
@@ -109,6 +117,10 @@ export function createSaga<State>(
   };
 
   const task = runSaga((() => rootSaga(api)) as SagaFn, env) as Task<void>;
+  task
+    .toPromise()
+    .finally(restoreSetState)
+    .catch(() => {});
 
   const useSaga = (() => api) as UseSaga<State>;
   useSaga.task = task;

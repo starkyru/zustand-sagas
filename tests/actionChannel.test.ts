@@ -89,6 +89,23 @@ describe('actionChannel effect', () => {
     expect((env.channel as any).subscriptions).toHaveLength(0);
   });
 
+  it('normal completion unsubscribes actionChannel from the event bus', async () => {
+    const env: RunnerEnv = {
+      channel: new ActionChannel(),
+      getState: () => ({}),
+    };
+
+    function* saga() {
+      yield actionChannel('EVENT');
+      return 'done';
+    }
+
+    const task = runSaga(saga, env);
+    await expect(task.toPromise()).resolves.toBe('done');
+
+    expect((env.channel as any).subscriptions).toHaveLength(0);
+  });
+
   it('flush drains buffered actions', async () => {
     const env: RunnerEnv = {
       channel: new ActionChannel(),
