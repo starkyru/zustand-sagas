@@ -7,14 +7,14 @@ import type { SagaFn, Task, Effect, SagaMonitor } from './types';
 function wrapActions<State extends object>(
   state: State,
   channel: ActionChannel,
-  wrapped: WeakSet<(...args: any[]) => any>,
+  wrapperToOriginal: WeakMap<(...args: any[]) => any, (...args: any[]) => any>,
 ): State {
   const raw = state as Record<string, unknown>;
   // Fast path: skip cloning if there are no unwrapped functions
   let needsWrap = false;
   for (const key of Object.keys(raw)) {
     const value = raw[key];
-    if (typeof value === 'function' && !wrapped.has(value as (...args: any[]) => any)) {
+    if (typeof value === 'function' && !wrapperToOriginal.has(value as (...args: any[]) => any)) {
       needsWrap = true;
       break;
     }
@@ -24,7 +24,7 @@ function wrapActions<State extends object>(
   const result = { ...raw };
   for (const key of Object.keys(result)) {
     const value = result[key];
-    if (typeof value === 'function' && !wrapped.has(value as (...args: any[]) => any)) {
+    if (typeof value === 'function' && !wrapperToOriginal.has(value as (...args: any[]) => any)) {
       const original = value as (...args: any[]) => any;
       const wrapper = (...args: unknown[]) => {
         // Run the original action first so state is updated,
@@ -36,8 +36,33 @@ function wrapActions<State extends object>(
         });
         return result;
       };
-      wrapped.add(wrapper);
+      wrapperToOriginal.set(wrapper, original);
       result[key] = wrapper;
+    }
+  }
+  return result as State;
+}
+
+function unwrapActions<State extends object>(
+  state: State,
+  wrapperToOriginal: WeakMap<(...args: any[]) => any, (...args: any[]) => any>,
+): State {
+  const raw = state as Record<string, unknown>;
+  let needsUnwrap = false;
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (typeof value === 'function' && wrapperToOriginal.has(value as (...args: any[]) => any)) {
+      needsUnwrap = true;
+      break;
+    }
+  }
+  if (!needsUnwrap) return state;
+
+  const result = { ...raw };
+  for (const key of Object.keys(result)) {
+    const value = result[key];
+    if (typeof value === 'function' && wrapperToOriginal.has(value as (...args: any[]) => any)) {
+      result[key] = wrapperToOriginal.get(value as (...args: any[]) => any);
     }
   }
   return result as State;
@@ -46,7 +71,7 @@ function wrapActions<State extends object>(
 function interceptSetState<State>(
   store: StoreApi<State>,
   channel: ActionChannel,
-  wrapped: WeakSet<(...args: any[]) => any>,
+  wrapperToOriginal: WeakMap<(...args: any[]) => any, (...args: any[]) => any>,
 ): () => void {
   const originalSetState = store.setState;
   const wrappedSetState = ((
@@ -59,14 +84,14 @@ function interceptSetState<State>(
         ((prev: State) => {
           const next = updater(prev);
           return typeof next === 'object' && next !== null
-            ? wrapActions(next as State & object, channel, wrapped)
+            ? wrapActions(next as State & object, channel, wrapperToOriginal)
             : next;
         }) as (state: State) => State | Partial<State>,
         replace as false,
       );
     } else if (typeof partial === 'object' && partial !== null) {
       originalSetState(
-        wrapActions(partial as State & object, channel, wrapped) as Partial<State>,
+        wrapActions(partial as State & object, channel, wrapperToOriginal) as Partial<State>,
         replace as false,
       );
     } else {
@@ -100,15 +125,15 @@ export function createSaga<State>(
   options?: CreateSagaOptions,
 ): UseSaga<State> {
   const channel = new ActionChannel();
-  const wrapped = new WeakSet<(...args: any[]) => any>();
+  const wrapperToOriginal = new WeakMap<(...args: any[]) => any, (...args: any[]) => any>();
 
   // Intercept setState to wrap new functions
-  const restoreSetState = interceptSetState(store, channel, wrapped);
+  const restoreSetState = interceptSetState(store, channel, wrapperToOriginal);
 
   // Wrap functions already in the store
   const currentState = store.getState();
   if (typeof currentState === 'object' && currentState !== null) {
-    store.setState(wrapActions(currentState as object, channel, wrapped) as State, true);
+    store.setState(wrapActions(currentState as object, channel, wrapperToOriginal) as State, true);
   }
 
   const api = createSagaApi<State>();
@@ -127,6 +152,21 @@ export function createSaga<State>(
     .toPromise()
     .finally(restoreSetState)
     .catch(() => {});
+
+  // Wrap cancel to also unwrap action functions so the old channel can be
+  // GC'd and re-attaching sagas won't stack wrappers on wrappers.
+  const originalCancel = task.cancel.bind(task);
+  task.cancel = () => {
+    originalCancel();
+    restoreSetState();
+    const teardownState = store.getState();
+    if (typeof teardownState === 'object' && teardownState !== null) {
+      store.setState(
+        unwrapActions(teardownState as State & object, wrapperToOriginal) as State,
+        true,
+      );
+    }
+  };
 
   const useSaga = (() => api) as UseSaga<State>;
   useSaga.task = task;

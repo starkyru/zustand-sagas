@@ -188,7 +188,7 @@ describe('createSagaMonitor', () => {
     const monitor = createSagaMonitor();
     const received: string[] = [];
 
-    function* saga() {
+    function* saga(): Generator<Effect, void, any> {
       const action = yield take('immediate');
       received.push((action as { payload: string }).payload);
     }

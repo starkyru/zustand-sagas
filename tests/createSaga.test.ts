@@ -148,6 +148,40 @@ describe('createSaga', () => {
     expect(store.setState).toBe(originalSetState);
   });
 
+  it('unwraps action functions on cancel so re-attach does not stack wrappers', async () => {
+    const original = () => {};
+    const store = createStore<{ count: number; inc: () => void }>((_set) => ({
+      count: 0,
+      inc: original,
+    }));
+
+    // First attach
+    const saga1 = createSaga(store, function* ({ take }) {
+      yield take('inc');
+    });
+    saga1.task.cancel();
+    await saga1.task.toPromise().catch(() => {});
+
+    // After cancel, action should be the original (not a wrapper)
+    expect(store.getState().inc).toBe(original);
+
+    // Second attach — should work normally, not wrap a wrapper
+    const log: string[] = [];
+    const saga2 = createSaga(store, function* ({ takeEvery, call }) {
+      yield takeEvery('inc', function* () {
+        log.push('fired');
+        yield call(() => store.setState((s) => ({ ...s, count: s.count + 1 })));
+      });
+    });
+
+    store.getState().inc();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(log).toEqual(['fired']);
+    expect(store.getState().count).toBe(1);
+
+    saga2.task.cancel();
+  });
+
   it('works with async side effects', async () => {
     const store = createStore<{
       data: string | null;
