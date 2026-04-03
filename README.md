@@ -1479,6 +1479,35 @@ task.cancel();
 
 The `SagaApi<State>` interface derives all type information from your store's state type. Every action-related effect constrains its arguments to valid store function names and their parameter types.
 
+### Typed results with `yield*`
+
+Use `yield*` (yield-star) instead of `yield` to get fully typed effect results — no casts needed:
+
+```ts
+import type { Saga } from 'zustand-sagas';
+
+createSaga(store, function* ({ take, select, fork, race, delay }): Saga {
+  // action is TypedActionEvent<Store, 'increment'> — fully typed
+  const action = yield* take('increment');
+
+  // count is number — inferred from selector
+  const count = yield* select((s) => s.count);
+
+  // task is Task<void> — inferred from the forked saga's return type
+  const task = yield* fork(function* (): Saga<void> { /* ... */ });
+
+  // winner is { timeout: void | undefined; action: TypedActionEvent | undefined }
+  const winner = yield* race({
+    timeout: delay(5000),
+    action: take('search'),
+  });
+});
+```
+
+Plain `yield` still works at the runtime level, but returns `unknown` at the type level — `yield*` is the recommended approach for new code.
+
+### Action type checking
+
 ```ts
 type Store = {
   count: number;
@@ -1488,32 +1517,46 @@ type Store = {
 };
 
 // Given SagaApi<StoreState>:
-yield take('increment');           // ✓
-yield take('count');               // ✗ — not a function
-yield take('typo');                // ✗ — doesn't exist
+yield* take('increment');           // ✓
+yield* take('count');               // ✗ — not a function
+yield* take('typo');                // ✗ — doesn't exist
 
-yield put('search', 'query');      // ✓
-yield put('search');               // ✗ — missing required arg
-yield put('search', 123);          // ✗ — wrong arg type
-yield put('setPosition', 10, 20);  // ✓
+yield* put('search', 'query');      // ✓
+yield* put('search');               // ✗ — missing required arg
+yield* put('search', 123);          // ✗ — wrong arg type
+yield* put('setPosition', 10, 20);  // ✓
 
-yield select((s) => s.count);      // s: Store, returns number
+yield* select((s) => s.count);      // s: Store, result: number
 ```
 
-Effect types are generic where it matters:
+### How `yield*` works
 
-| Effect                   | Generic            | Preserves                         |
-|--------------------------|--------------------|-----------------------------------|
-| `TakeEffect<Value>`      | Channel value type  | `take(channel)` keeps `Value`     |
-| `TakeMaybeEffect<Value>` | Channel value type  | Same                              |
-| `SelectEffect<Result>`   | Selector return type| `select(s => s.count)` keeps type |
-| `JoinEffect<Result>`     | Task result type    | `join(task)` keeps `Result`       |
-| `CancelEffect<Result>`   | Task result type    | `cancel(task)` keeps `Result`     |
-| `FlushEffect<Value>`     | Channel value type  | `flush(channel)` keeps `Value`    |
-| `RetryEffect<Fn>`        | Function type       | Preserves fn signature            |
-| `Task<Result>`           | Result type         | `fork`/`spawn` return typed tasks |
+Each effect object carries a `Symbol.iterator` that delegates to the saga runner via a single `yield`. When you write `yield* take('increment')`, TypeScript sees the generator's return type and infers the resolved value. The runner sees the same plain effect object it always has — no protocol change.
 
-All generics have defaults, so unparameterized usage (`TakeEffect`, `JoinEffect`, etc.) works unchanged.
+### Effect result types
+
+| Effect                       | `yield*` result type                        |
+|------------------------------|---------------------------------------------|
+| `take('action')`             | `TypedActionEvent<State, 'action'>`         |
+| `take(channel)`              | `Value` (channel's value type)              |
+| `takeMaybe(channel)`         | `Value \| END`                              |
+| `select((s) => s.count)`     | `number` (selector return type)             |
+| `select()`                   | `State`                                     |
+| `call(fn, ...args)`          | `ReturnType<fn>` (or generator return type) |
+| `fork(saga)`                 | `Task<Result>` (saga's return type)         |
+| `spawn(saga)`                | `Task<Result>`                              |
+| `join(task)`                 | `Result` (task's result type)               |
+| `cancel(task)`               | `void`                                      |
+| `put('action', ...args)`     | `void`                                      |
+| `delay(ms)`                  | `true`                                      |
+| `race({ a, b })`            | `{ a: A \| undefined, b: B \| undefined }` |
+| `all([effectA, effectB])`    | `[ResultA, ResultB]`                        |
+| `allSettled([a, b])`         | `[SettledResult<A>, SettledResult<B>]`       |
+| `actionChannel('pattern')`   | `Channel<TypedActionEvent>`                 |
+| `flush(channel)`             | `Value[]`                                   |
+| `retry(n, ms, fn, ...args)`  | `ReturnType<fn>`                            |
+
+All effect types have sensible defaults, so unparameterized usage (`TakeEffect`, `JoinEffect`, etc.) works unchanged.
 
 ## Types
 
@@ -1540,8 +1583,10 @@ import type {
   RetryEffect,         // RetryEffect<Fn> — first-class retry effect
   UntilEffect,         // until effect type
   Task,                // Task<Result> — generic over result type
-  Saga,                // User-facing saga generator type: Generator<Effect, Result, any>
+  Saga,                // User-facing saga generator type: Generator<Effect, Result, unknown>
   SagaFn,
+  EffectDescriptor,    // Marker interface for yield* support on effects
+  EffectResult,        // Extract resolved type from an effect: EffectResult<TakeEffect<V>> → V
   Channel,             // Channel interface
   Buffer,              // Buffer interface
   CallWorkerEffect,    // callWorker effect type

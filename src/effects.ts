@@ -56,88 +56,135 @@ import {
 import { isChannel, type Channel } from './channels';
 import type { Buffer } from './buffers';
 
+function makeEffect<T extends object>(effect: T): T {
+  Object.defineProperty(effect, Symbol.iterator, {
+    enumerable: false,
+    configurable: true,
+    writable: false,
+    value: function* effectIterator(): Generator<unknown, unknown, unknown> {
+      return yield effect;
+    },
+  });
+  return effect;
+}
+
 export function take<Value>(patternOrChannel: ActionPattern | Channel<Value>): TakeEffect<Value> {
   if (isChannel(patternOrChannel)) {
-    return { type: TAKE, channel: patternOrChannel };
+    return makeEffect({ type: TAKE, channel: patternOrChannel }) as TakeEffect<Value>;
   }
-  return { type: TAKE, pattern: patternOrChannel as ActionPattern };
+  return makeEffect({
+    type: TAKE,
+    pattern: patternOrChannel as ActionPattern,
+  }) as TakeEffect<Value>;
 }
 
 export function takeMaybe<Value>(
   patternOrChannel: ActionPattern | Channel<Value>,
 ): TakeMaybeEffect<Value> {
   if (isChannel(patternOrChannel)) {
-    return { type: TAKE_MAYBE, channel: patternOrChannel };
+    return makeEffect({ type: TAKE_MAYBE, channel: patternOrChannel }) as TakeMaybeEffect<Value>;
   }
-  return { type: TAKE_MAYBE, pattern: patternOrChannel as ActionPattern };
+  return makeEffect({
+    type: TAKE_MAYBE,
+    pattern: patternOrChannel as ActionPattern,
+  }) as TakeMaybeEffect<Value>;
 }
 
 export function call<Fn extends (...args: any[]) => any>(
   fn: Fn,
   ...args: Parameters<Fn>
 ): CallEffect<Fn> {
-  return { type: CALL, fn, args } as CallEffect<Fn>;
+  return makeEffect({
+    type: CALL,
+    fn,
+    args,
+  }) as CallEffect<Fn>;
 }
 
 export function select<Result>(selector?: (state: any) => Result): SelectEffect<Result> {
-  return { type: SELECT, selector };
+  return makeEffect({ type: SELECT, selector }) as SelectEffect<Result>;
 }
 
 export function fork<Saga extends SagaFn>(saga: Saga, ...args: Parameters<Saga>): ForkEffect<Saga> {
-  return { type: FORK, saga, args } as ForkEffect<Saga>;
+  return makeEffect({
+    type: FORK,
+    saga,
+    args,
+  }) as ForkEffect<Saga>;
 }
 
 export function spawn<Saga extends SagaFn>(
   saga: Saga,
   ...args: Parameters<Saga>
 ): SpawnEffect<Saga> {
-  return { type: SPAWN, saga, args } as SpawnEffect<Saga>;
+  return makeEffect({
+    type: SPAWN,
+    saga,
+    args,
+  }) as SpawnEffect<Saga>;
 }
 
 export function put(action: ActionEvent): PutEffect {
-  return { type: PUT, action };
+  return makeEffect({ type: PUT, action }) as PutEffect;
 }
 
 export function join<Result>(task: Task<Result>): JoinEffect<Result> {
-  return { type: JOIN, task };
+  return makeEffect({ type: JOIN, task }) as JoinEffect<Result>;
 }
 
 export function cps<Fn extends (...args: any[]) => void>(
   fn: Fn,
   ...args: CpsEffect<Fn>['args']
 ): CpsEffect<Fn> {
-  return { type: CPS, fn, args } as CpsEffect<Fn>;
+  return makeEffect({
+    type: CPS,
+    fn,
+    args,
+  }) as CpsEffect<Fn>;
 }
 
 export function cancel<Result>(task: Task<Result>): CancelEffect<Result> {
-  return { type: CANCEL, task };
+  return makeEffect({ type: CANCEL, task }) as CancelEffect<Result>;
 }
 
 export function delay(ms: number): DelayEffect {
-  return { type: DELAY, ms };
+  return makeEffect({ type: DELAY, ms }) as DelayEffect;
 }
 
-export function race(effects: Record<string, Effect>): RaceEffect {
-  return { type: RACE, effects };
+export function race<Effects extends Record<string, Effect>>(
+  effects: Effects,
+): RaceEffect<Effects> {
+  return makeEffect({
+    type: RACE,
+    effects,
+  }) as RaceEffect<Effects>;
 }
 
-export function all(effects: Effect[]): AllEffect {
-  return { type: ALL, effects };
+export function all<Effects extends readonly Effect[]>(effects: Effects): AllEffect<Effects> {
+  return makeEffect({
+    type: ALL,
+    effects,
+  }) as AllEffect<Effects>;
 }
 
-export function allSettled(effects: Effect[]): AllSettledEffect {
-  return { type: ALL_SETTLED, effects };
+export function allSettled<Effects extends readonly Effect[]>(
+  effects: Effects,
+): AllSettledEffect<Effects> {
+  return makeEffect({
+    type: ALL_SETTLED,
+    effects,
+  }) as AllSettledEffect<Effects>;
 }
 
 export function actionChannel(
   pattern: ActionPattern,
   buffer?: Buffer<ActionEvent>,
 ): ActionChannelEffect {
-  return { type: ACTION_CHANNEL, pattern, buffer };
+  return makeEffect({ type: ACTION_CHANNEL, pattern, buffer }) as ActionChannelEffect;
 }
 
 export function flush<Value>(chan: Channel<Value>): FlushEffect<Value> {
-  return { type: FLUSH, channel: chan };
+  return makeEffect({ type: FLUSH, channel: chan }) as FlushEffect<Value>;
 }
 
 export function retry<Fn extends (...args: any[]) => any>(
@@ -146,42 +193,48 @@ export function retry<Fn extends (...args: any[]) => any>(
   fn: Fn,
   ...args: Parameters<Fn>
 ): RetryEffect<Fn> {
-  return { type: RETRY, maxTries, delayMs, fn, args } as RetryEffect<Fn>;
+  return makeEffect({
+    type: RETRY,
+    maxTries,
+    delayMs,
+    fn,
+    args,
+  }) as RetryEffect<Fn>;
 }
 
 export function callWorker<Fn extends WorkerFn>(
   fn: Fn,
   ...args: WorkerArgs<Fn>
 ): CallWorkerEffect<Fn> {
-  return { type: CALL_WORKER, fn, args } as CallWorkerEffect<Fn>;
+  return makeEffect({ type: CALL_WORKER, fn, args }) as CallWorkerEffect<Fn>;
 }
 
 export function forkWorker<Fn extends WorkerFn>(
   fn: Fn,
   ...args: WorkerArgs<Fn>
 ): ForkWorkerEffect<Fn> {
-  return { type: FORK_WORKER, fn, args } as ForkWorkerEffect<Fn>;
+  return makeEffect({ type: FORK_WORKER, fn, args }) as ForkWorkerEffect<Fn>;
 }
 
 export function spawnWorker<Fn extends WorkerFn>(
   fn: Fn,
   ...args: WorkerArgs<Fn>
 ): SpawnWorkerEffect<Fn> {
-  return { type: SPAWN_WORKER, fn, args } as SpawnWorkerEffect<Fn>;
+  return makeEffect({ type: SPAWN_WORKER, fn, args }) as SpawnWorkerEffect<Fn>;
 }
 
 export function forkWorkerChannel<Fn extends WorkerFn>(
   fn: Fn,
   ...args: WorkerArgs<Fn>
 ): ForkWorkerChannelEffect<Fn> {
-  return { type: FORK_WORKER_CHANNEL, fn, args } as ForkWorkerChannelEffect<Fn>;
+  return makeEffect({ type: FORK_WORKER_CHANNEL, fn, args }) as ForkWorkerChannelEffect<Fn>;
 }
 
 export function until(
   predicate: string | ((state: unknown) => unknown),
   timeout?: number,
 ): UntilEffect {
-  return { type: UNTIL, predicate, timeout };
+  return makeEffect({ type: UNTIL, predicate, timeout }) as UntilEffect;
 }
 
 export function callWorkerGen<Fn extends WorkerFn>(
@@ -189,5 +242,10 @@ export function callWorkerGen<Fn extends WorkerFn>(
   handler: (...args: any[]) => Generator<Effect, any, any>,
   ...args: WorkerArgs<Fn>
 ): CallWorkerGenEffect<Fn> {
-  return { type: CALL_WORKER_GEN, fn, handler: handler as SagaFn, args } as CallWorkerGenEffect<Fn>;
+  return makeEffect({
+    type: CALL_WORKER_GEN,
+    fn,
+    handler: handler as SagaFn,
+    args,
+  }) as CallWorkerGenEffect<Fn>;
 }

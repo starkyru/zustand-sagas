@@ -111,6 +111,8 @@ export type {
   CallWorkerGenEffect,
   ActionChannelEffect,
   FlushEffect,
+  EffectDescriptor,
+  EffectResult,
   Task,
   Saga,
   SagaFn,

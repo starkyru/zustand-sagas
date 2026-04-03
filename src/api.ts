@@ -53,27 +53,37 @@ type TypedWorker<State, Key extends ActionNames<State>> = (
 ) => Generator<Effect, void, any>;
 
 type UntypedWorker = (action: ActionEvent) => Generator<Effect, void, any>;
+type PutAction<State, Key extends ActionNames<State>> = TypedActionEvent<State, Key>;
 
 export interface SagaApi<State> {
-  take<Key extends ActionNames<State>>(pattern: Key): TakeEffect;
-  take(pattern: ActionNames<State>[]): TakeEffect;
-  take(pattern: (action: ActionEvent) => boolean): TakeEffect;
-  take<Value>(channel: Channel<Value>): TakeEffect;
+  take<Key extends ActionNames<State>>(pattern: Key): TakeEffect<TypedActionEvent<State, Key>>;
+  take<Keys extends ActionNames<State>>(
+    pattern: readonly Keys[],
+  ): TakeEffect<TypedActionEvent<State, Keys>>;
+  take(pattern: (action: ActionEvent) => boolean): TakeEffect<ActionEvent>;
+  take<Value>(channel: Channel<Value>): TakeEffect<Value>;
 
-  takeMaybe<Key extends ActionNames<State>>(pattern: Key): TakeMaybeEffect;
-  takeMaybe(pattern: ActionNames<State>[]): TakeMaybeEffect;
-  takeMaybe(pattern: (action: ActionEvent) => boolean): TakeMaybeEffect;
-  takeMaybe<Value>(channel: Channel<Value>): TakeMaybeEffect;
+  takeMaybe<Key extends ActionNames<State>>(
+    pattern: Key,
+  ): TakeMaybeEffect<TypedActionEvent<State, Key>>;
+  takeMaybe<Keys extends ActionNames<State>>(
+    pattern: readonly Keys[],
+  ): TakeMaybeEffect<TypedActionEvent<State, Keys>>;
+  takeMaybe(pattern: (action: ActionEvent) => boolean): TakeMaybeEffect<ActionEvent>;
+  takeMaybe<Value>(channel: Channel<Value>): TakeMaybeEffect<Value | import('./channels').END>;
 
   actionChannel<Key extends ActionNames<State>>(
     pattern: Key,
     buffer?: Buffer<TypedActionEvent<State, Key>>,
-  ): ActionChannelEffect;
-  actionChannel(pattern: ActionNames<State>[], buffer?: Buffer<ActionEvent>): ActionChannelEffect;
+  ): ActionChannelEffect<TypedActionEvent<State, Key>>;
+  actionChannel<Keys extends ActionNames<State>>(
+    pattern: readonly Keys[],
+    buffer?: Buffer<TypedActionEvent<State, Keys>>,
+  ): ActionChannelEffect<TypedActionEvent<State, Keys>>;
   actionChannel(
     pattern: (action: ActionEvent) => boolean,
     buffer?: Buffer<ActionEvent>,
-  ): ActionChannelEffect;
+  ): ActionChannelEffect<ActionEvent>;
 
   flush<Value>(channel: Channel<Value>): FlushEffect;
 
@@ -131,8 +141,14 @@ export interface SagaApi<State> {
     worker: (action: A) => Generator<Effect, void, any>,
   ): ForkEffect;
 
-  put<Key extends ActionNames<State>>(type: Key, ...args: ActionArgs<State, Key>): PutEffect;
-  putApply<Key extends ActionNames<State>>(type: Key, args: ActionArgs<State, Key>): PutEffect;
+  put<Key extends ActionNames<State>>(
+    type: Key,
+    ...args: ActionArgs<State, Key>
+  ): PutEffect<PutAction<State, Key>>;
+  putApply<Key extends ActionNames<State>>(
+    type: Key,
+    args: ActionArgs<State, Key>,
+  ): PutEffect<PutAction<State, Key>>;
 
   until<Key extends string & keyof State>(predicate: Key, timeout?: number): UntilEffect;
   until(predicate: (state: State) => unknown, timeout?: number): UntilEffect;
@@ -140,7 +156,7 @@ export interface SagaApi<State> {
   // Pass-through effects (no action name involved)
   call: typeof call;
   select<Result>(selector: (state: State) => Result): SelectEffect<Result>;
-  select(): SelectEffect;
+  select(): SelectEffect<State>;
   fork: typeof fork;
   spawn: typeof spawn;
   join: typeof join;

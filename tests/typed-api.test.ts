@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { sagas, createSagaApi } from '../src';
-import type { TypedActionEvent } from '../src';
+import type { Saga, TypedActionEvent } from '../src';
 
 type StoreState = {
   count: number;
@@ -28,6 +28,19 @@ const _goodTake = standaloneApi.take('increment');
 const _goodTake2 = standaloneApi.take('search');
 const _goodTake3 = standaloneApi.take((a) => a.type === 'increment');
 
+const _typedYieldStarSaga = function* (): Saga<void> {
+  const incrementAction = yield* standaloneApi.take('increment');
+  const _: TypedActionEvent<StoreState, 'increment'> = incrementAction;
+
+  const query = yield* standaloneApi.select((state) => state.query);
+  const _query: string = query;
+
+  const task = yield* standaloneApi.fork(function* (): Saga<'done'> {
+    return 'done';
+  });
+  const _taskResult: Promise<'done'> = task.toPromise();
+};
+
 describe('DI: typed effects injected into root saga', () => {
   it('take only accepts valid store action names', async () => {
     let received: TypedActionEvent<StoreState, 'increment'> | undefined;
@@ -35,7 +48,7 @@ describe('DI: typed effects injected into root saga', () => {
     const store = createStore(
       sagas(
         function* ({ take }) {
-          received = yield take('increment');
+          received = yield* take('increment');
         },
         (set) => ({
           count: 0,
@@ -119,7 +132,7 @@ describe('DI: typed effects injected into root saga', () => {
     const store = createStore(
       sagas(
         function* ({ take }) {
-          received = yield take('setPosition');
+          received = yield* take('setPosition');
         },
         (set) => ({
           count: 0,

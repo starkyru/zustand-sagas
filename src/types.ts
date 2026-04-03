@@ -39,6 +39,32 @@ export type TypedActionEvent<State, Key extends ActionNames<State> = ActionNames
   payload: ActionPayload<State, Key>;
 };
 
+declare const EFFECT_RESULT: unique symbol;
+
+/**
+ * Marker interface that lets effect descriptors participate in `yield*`
+ * so TypeScript can infer the resumed value for that specific effect.
+ */
+export interface EffectDescriptor<Result = unknown> {
+  readonly [EFFECT_RESULT]?: Result;
+  [Symbol.iterator](): Generator<unknown, Result, Result>;
+}
+
+export type EffectResult<E> = E extends EffectDescriptor<infer Result> ? Result : never;
+
+type SagaReturn<Saga extends (...args: any[]) => Generator> =
+  ReturnType<Saga> extends Generator<any, infer Result, any> ? Result : never;
+
+type CallResult<Fn extends (...args: any[]) => any> =
+  ReturnType<Fn> extends Generator<any, infer Result, any> ? Result : Awaited<ReturnType<Fn>>;
+
+type CpsResult<Fn extends (...args: any[]) => void> =
+  Parameters<Fn> extends [...any[], CpsCallback<infer Result>] ? Result : unknown;
+
+type WorkerResult<Fn extends WorkerFn> = Fn extends (...args: any[]) => any
+  ? Awaited<ReturnType<Fn>>
+  : unknown;
+
 // --- Effects ---
 
 export const TAKE: unique symbol = Symbol('TAKE');
@@ -65,72 +91,88 @@ export const ALL_SETTLED: unique symbol = Symbol('ALL_SETTLED');
 export const RETRY: unique symbol = Symbol('RETRY');
 export const UNTIL: unique symbol = Symbol('UNTIL');
 
-export type TakeEffect<Value = any> =
+export type TakeEffect<Value = ActionEvent> = (
   | { type: typeof TAKE; pattern: ActionPattern; channel?: undefined }
-  | { type: typeof TAKE; pattern?: undefined; channel: import('./channels').Channel<Value> };
+  | { type: typeof TAKE; pattern?: undefined; channel: import('./channels').Channel<Value> }
+) &
+  EffectDescriptor<Value>;
 
-export type TakeMaybeEffect<Value = any> =
+export type TakeMaybeEffect<Value = ActionEvent> = (
   | { type: typeof TAKE_MAYBE; pattern: ActionPattern; channel?: undefined }
-  | { type: typeof TAKE_MAYBE; pattern?: undefined; channel: import('./channels').Channel<Value> };
+  | { type: typeof TAKE_MAYBE; pattern?: undefined; channel: import('./channels').Channel<Value> }
+) &
+  EffectDescriptor<Value>;
 
-export interface ActionChannelEffect {
+export interface ActionChannelEffect<Value = ActionEvent> extends EffectDescriptor<
+  import('./channels').Channel<Value>
+> {
   type: typeof ACTION_CHANNEL;
   pattern: ActionPattern;
-  buffer?: import('./buffers').Buffer<ActionEvent>;
+  buffer?: import('./buffers').Buffer<Value>;
 }
 
-export interface FlushEffect<Value = unknown> {
+export interface FlushEffect<Value = unknown> extends EffectDescriptor<Value[]> {
   type: typeof FLUSH;
   channel: import('./channels').Channel<Value>;
 }
 
-export interface CallEffect<Fn extends (...args: any[]) => any = (...args: any[]) => any> {
+export interface CallEffect<
+  Fn extends (...args: any[]) => any = (...args: any[]) => any,
+> extends EffectDescriptor<CallResult<Fn>> {
   type: typeof CALL;
   fn: Fn;
   args: Parameters<Fn>;
 }
 
-export interface SelectEffect<Result = unknown> {
+export interface SelectEffect<Result = unknown> extends EffectDescriptor<Result> {
   type: typeof SELECT;
-  selector?: (state: any) => Result;
+  selector?: (state: unknown) => Result;
 }
 
-export interface ForkEffect<Saga extends SagaFn = SagaFn> {
+export interface ForkEffect<Saga extends SagaFn = SagaFn> extends EffectDescriptor<
+  Task<SagaReturn<Saga>>
+> {
   type: typeof FORK;
   saga: Saga;
   args: Parameters<Saga>;
 }
 
-export interface SpawnEffect<Saga extends SagaFn = SagaFn> {
+export interface SpawnEffect<Saga extends SagaFn = SagaFn> extends EffectDescriptor<
+  Task<SagaReturn<Saga>>
+> {
   type: typeof SPAWN;
   saga: Saga;
   args: Parameters<Saga>;
 }
 
-export interface PutEffect {
+export interface PutEffect<
+  Action extends ActionEvent = ActionEvent,
+> extends EffectDescriptor<void> {
   type: typeof PUT;
-  action: ActionEvent;
+  action: Action;
 }
 
-export interface JoinEffect<Result = unknown> {
+export interface JoinEffect<Result = unknown> extends EffectDescriptor<Result> {
   type: typeof JOIN;
   task: Task<Result>;
 }
 
-export interface CancelEffect<Result = unknown> {
+export interface CancelEffect<Result = unknown> extends EffectDescriptor<void> {
   type: typeof CANCEL;
   task: Task<Result>;
 }
 
 export type CpsCallback<Result = unknown> = (error: unknown, result?: Result) => void;
 
-export interface CpsEffect<Fn extends (...args: any[]) => void = (...args: any[]) => void> {
+export interface CpsEffect<
+  Fn extends (...args: any[]) => void = (...args: any[]) => void,
+> extends EffectDescriptor<CpsResult<Fn>> {
   type: typeof CPS;
   fn: Fn;
   args: Parameters<Fn> extends [...infer Init, CpsCallback] ? Init : Parameters<Fn>;
 }
 
-export interface DelayEffect {
+export interface DelayEffect extends EffectDescriptor<true> {
   type: typeof DELAY;
   ms: number;
 }
@@ -159,34 +201,66 @@ export interface WorkerEffect<
   handler?: SagaFn;
 }
 
-export type CallWorkerEffect<Fn extends WorkerFn = WorkerFn> = WorkerEffect<typeof CALL_WORKER, Fn>;
-export type ForkWorkerEffect<Fn extends WorkerFn = WorkerFn> = WorkerEffect<typeof FORK_WORKER, Fn>;
+export type CallWorkerEffect<Fn extends WorkerFn = WorkerFn> = WorkerEffect<
+  typeof CALL_WORKER,
+  Fn
+> &
+  EffectDescriptor<WorkerResult<Fn>>;
+export type ForkWorkerEffect<Fn extends WorkerFn = WorkerFn> = WorkerEffect<
+  typeof FORK_WORKER,
+  Fn
+> &
+  EffectDescriptor<Task<WorkerResult<Fn>>>;
 export type SpawnWorkerEffect<Fn extends WorkerFn = WorkerFn> = WorkerEffect<
   typeof SPAWN_WORKER,
   Fn
->;
+> &
+  EffectDescriptor<Task<WorkerResult<Fn>>>;
 export type ForkWorkerChannelEffect<Fn extends WorkerFn = WorkerFn> = WorkerEffect<
   typeof FORK_WORKER_CHANNEL,
   Fn
->;
+> &
+  EffectDescriptor<{
+    channel: import('./channels').Channel<unknown>;
+    task: Task<WorkerResult<Fn>>;
+  }>;
 export type CallWorkerGenEffect<Fn extends WorkerFn = WorkerFn> = WorkerEffect<
   typeof CALL_WORKER_GEN,
   Fn
->;
+> &
+  EffectDescriptor<WorkerResult<Fn>>;
 
-export interface RaceEffect {
+export type RaceResult<Effects extends Record<string, Effect>> = {
+  [Key in keyof Effects]: EffectResult<Effects[Key]> | undefined;
+};
+
+export interface RaceEffect<
+  Effects extends Record<string, Effect> = Record<string, Effect>,
+> extends EffectDescriptor<RaceResult<Effects>> {
   type: typeof RACE;
-  effects: Record<string, Effect>;
+  effects: Effects;
 }
 
-export interface AllEffect {
+export type AllResult<Effects extends readonly Effect[]> = {
+  [Key in keyof Effects]: EffectResult<Effects[Key]>;
+};
+
+export interface AllEffect<Effects extends readonly Effect[] = Effect[]> extends EffectDescriptor<
+  AllResult<Effects>
+> {
   type: typeof ALL;
-  effects: Effect[];
+  effects: Effects;
 }
 
-export interface AllSettledEffect {
+export type AllSettledResult<Effects extends readonly Effect[]> = {
+  [Key in keyof Effects]: SettledResult<EffectResult<Effects[Key]>>;
+};
+
+export interface AllSettledEffect<
+  Effects extends readonly Effect[] = Effect[],
+> extends EffectDescriptor<AllSettledResult<Effects>> {
   type: typeof ALL_SETTLED;
-  effects: Effect[];
+  effects: Effects;
 }
 
 export interface SettledFulfilled<T = unknown> {
@@ -201,7 +275,9 @@ export interface SettledRejected {
 
 export type SettledResult<T = unknown> = SettledFulfilled<T> | SettledRejected;
 
-export interface RetryEffect<Fn extends (...args: any[]) => any = (...args: any[]) => any> {
+export interface RetryEffect<
+  Fn extends (...args: any[]) => any = (...args: any[]) => any,
+> extends EffectDescriptor<CallResult<Fn>> {
   type: typeof RETRY;
   maxTries: number;
   delayMs: number;
@@ -209,7 +285,7 @@ export interface RetryEffect<Fn extends (...args: any[]) => any = (...args: any[
   args: Parameters<Fn>;
 }
 
-export interface UntilEffect {
+export interface UntilEffect extends EffectDescriptor<true | import('./channels').END> {
   type: typeof UNTIL;
   predicate: string | ((state: unknown) => unknown);
   timeout?: number;
@@ -253,11 +329,11 @@ export interface Task<Result = unknown> {
 
 // --- Saga function ---
 
-/** Internal saga function type — accepts any generator that yields Effects. */
-export type SagaFn = (...args: any[]) => Generator<Effect, unknown, any>;
+/** Internal/public saga function type. Prefer `yield*` with effect creators for typed results. */
+export type SagaFn = (...args: any[]) => Generator<Effect, unknown, unknown>;
 
-/** User-facing saga generator type. Yields return `any` so fork/take results need no casts. */
-export type Saga<Result = void> = Generator<Effect, Result, any>;
+/** User-facing saga generator type. Use `yield*` to get per-effect result types. */
+export type Saga<Result = void> = Generator<Effect, Result, unknown>;
 
 // --- Saga Monitor ---
 
