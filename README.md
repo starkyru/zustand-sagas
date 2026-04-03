@@ -780,7 +780,7 @@ Higher-level patterns built on core effects. Each helper forks an internal loop,
 
 #### `takeEvery(pattern, worker)`
 
-Forks `worker` for **every** action matching `pattern`. All instances run concurrently.
+Forks `worker` saga for **every** action matching `pattern`. All instances run concurrently.
 
 ```ts
 function* rootSaga({ takeEvery }) {
@@ -790,7 +790,7 @@ function* rootSaga({ takeEvery }) {
 
 #### `takeLatest(pattern, worker)`
 
-Forks `worker` for the latest matching action. Automatically cancels any previously forked instance.
+Forks `worker` saga for the latest matching action. Automatically cancels any previously forked instance.
 
 ```ts
 function* rootSaga({ takeLatest }) {
@@ -800,7 +800,7 @@ function* rootSaga({ takeLatest }) {
 
 #### `takeLeading(pattern, worker)`
 
-Calls `worker` for the first matching action, then blocks until it completes before listening again. Actions arriving while the worker is running are dropped.
+Calls `worker` saga for the first matching action, then blocks until it completes before listening again. Actions arriving while the worker is running are dropped.
 
 ```ts
 function* rootSaga({ takeLeading }) {
@@ -810,7 +810,7 @@ function* rootSaga({ takeLeading }) {
 
 #### `debounce(ms, pattern, worker)`
 
-Waits `ms` after the latest matching action before running `worker`. Restarts the timer on each new action.
+Waits `ms` after the latest matching action before running `worker` saga. Restarts the timer on each new action.
 
 ```ts
 function* rootSaga({ debounce }) {
@@ -820,7 +820,7 @@ function* rootSaga({ debounce }) {
 
 #### `throttle(ms, pattern, worker)`
 
-Processes at most one action per `ms` milliseconds. Accepts the first, then ignores for the duration.
+Runs `worker` saga for at most one action per `ms` milliseconds. Accepts the first, then ignores for the duration.
 
 ```ts
 function* rootSaga({ throttle }) {
