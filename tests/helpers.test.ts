@@ -155,3 +155,104 @@ describe('throttle', () => {
     task.cancel();
   });
 });
+
+describe('pattern matching', () => {
+  it('takeEvery with array pattern matches multiple action types', async () => {
+    const calls: string[] = [];
+
+    function* worker(action: ActionEvent) {
+      calls.push(action.type);
+    }
+
+    function* rootSaga() {
+      yield takeEvery(['increment', 'decrement'], worker);
+    }
+
+    const env = createEnv();
+    const task = runSaga(rootSaga, env);
+
+    env.channel.emit({ type: 'increment' });
+    await new Promise((r) => setTimeout(r, 10));
+    env.channel.emit({ type: 'decrement' });
+    await new Promise((r) => setTimeout(r, 10));
+    env.channel.emit({ type: 'reset' });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(calls).toEqual(['increment', 'decrement']);
+    task.cancel();
+  });
+
+  it('takeEvery with predicate pattern', async () => {
+    const calls: string[] = [];
+
+    function* worker(action: ActionEvent) {
+      calls.push(action.type);
+    }
+
+    function* rootSaga() {
+      yield takeEvery((a: ActionEvent) => a.type.startsWith('fetch'), worker);
+    }
+
+    const env = createEnv();
+    const task = runSaga(rootSaga, env);
+
+    env.channel.emit({ type: 'fetchUsers' });
+    await new Promise((r) => setTimeout(r, 10));
+    env.channel.emit({ type: 'update' });
+    await new Promise((r) => setTimeout(r, 10));
+    env.channel.emit({ type: 'fetchPosts' });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(calls).toEqual(['fetchUsers', 'fetchPosts']);
+    task.cancel();
+  });
+
+  it('takeLatest with array pattern cancels previous per-pattern', async () => {
+    const results: number[] = [];
+
+    function* worker(action: ActionEvent) {
+      yield delay(50);
+      results.push(action.payload as number);
+    }
+
+    function* rootSaga() {
+      yield takeLatest(['save', 'update'], worker);
+    }
+
+    const env = createEnv();
+    const task = runSaga(rootSaga, env);
+
+    env.channel.emit({ type: 'save', payload: 1 });
+    await new Promise((r) => setTimeout(r, 10));
+    env.channel.emit({ type: 'update', payload: 2 });
+    await new Promise((r) => setTimeout(r, 80));
+
+    // First worker cancelled, only second completes
+    expect(results).toEqual([2]);
+    task.cancel();
+  });
+
+  it('takeLeading with predicate blocks during active worker', async () => {
+    const calls: string[] = [];
+
+    function* worker(action: ActionEvent) {
+      yield delay(50);
+      calls.push(action.type);
+    }
+
+    function* rootSaga() {
+      yield takeLeading((a: ActionEvent) => a.type === 'go', worker);
+    }
+
+    const env = createEnv();
+    const task = runSaga(rootSaga, env);
+
+    env.channel.emit({ type: 'go' });
+    await new Promise((r) => setTimeout(r, 10));
+    env.channel.emit({ type: 'go' }); // should be ignored
+    await new Promise((r) => setTimeout(r, 80));
+
+    expect(calls).toEqual(['go']);
+    task.cancel();
+  });
+});

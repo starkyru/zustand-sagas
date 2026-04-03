@@ -43,6 +43,17 @@ describe('ActionChannel', () => {
     expect(r2).toEqual({ type: 'b', payload: 2 });
   });
 
+  it('supports array patterns', async () => {
+    const channel = new ActionChannel();
+    const { promise } = channel.take(['fetchUsers', 'fetchPosts']);
+
+    channel.emit({ type: 'update' });
+    channel.emit({ type: 'fetchPosts', payload: 'data' });
+
+    const action = await promise;
+    expect(action).toEqual({ type: 'fetchPosts', payload: 'data' });
+  });
+
   it('supports predicate patterns', async () => {
     const channel = new ActionChannel();
     const { promise } = channel.take((a) => a.type.startsWith('fetch'));

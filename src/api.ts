@@ -52,12 +52,16 @@ type TypedWorker<State, Key extends ActionNames<State>> = (
   action: TypedActionEvent<State, Key>,
 ) => Generator<Effect, void, any>;
 
+type UntypedWorker = (action: ActionEvent) => Generator<Effect, void, any>;
+
 export interface SagaApi<State> {
   take<Key extends ActionNames<State>>(pattern: Key): TakeEffect;
+  take(pattern: ActionNames<State>[]): TakeEffect;
   take(pattern: (action: ActionEvent) => boolean): TakeEffect;
   take<Value>(channel: Channel<Value>): TakeEffect;
 
   takeMaybe<Key extends ActionNames<State>>(pattern: Key): TakeMaybeEffect;
+  takeMaybe(pattern: ActionNames<State>[]): TakeMaybeEffect;
   takeMaybe(pattern: (action: ActionEvent) => boolean): TakeMaybeEffect;
   takeMaybe<Value>(channel: Channel<Value>): TakeMaybeEffect;
 
@@ -65,6 +69,7 @@ export interface SagaApi<State> {
     pattern: Key,
     buffer?: Buffer<TypedActionEvent<State, Key>>,
   ): ActionChannelEffect;
+  actionChannel(pattern: ActionNames<State>[], buffer?: Buffer<ActionEvent>): ActionChannelEffect;
   actionChannel(
     pattern: (action: ActionEvent) => boolean,
     buffer?: Buffer<ActionEvent>,
@@ -76,15 +81,30 @@ export interface SagaApi<State> {
     pattern: Key,
     worker: TypedWorker<State, Key>,
   ): ForkEffect;
+  takeEvery(pattern: ActionNames<State>[], worker: UntypedWorker): ForkEffect;
+  takeEvery<A extends ActionEvent>(
+    pattern: (action: ActionEvent) => boolean,
+    worker: (action: A) => Generator<Effect, void, any>,
+  ): ForkEffect;
 
   takeLatest<Key extends ActionNames<State>>(
     pattern: Key,
     worker: TypedWorker<State, Key>,
   ): ForkEffect;
+  takeLatest(pattern: ActionNames<State>[], worker: UntypedWorker): ForkEffect;
+  takeLatest<A extends ActionEvent>(
+    pattern: (action: ActionEvent) => boolean,
+    worker: (action: A) => Generator<Effect, void, any>,
+  ): ForkEffect;
 
   takeLeading<Key extends ActionNames<State>>(
     pattern: Key,
     worker: TypedWorker<State, Key>,
+  ): ForkEffect;
+  takeLeading(pattern: ActionNames<State>[], worker: UntypedWorker): ForkEffect;
+  takeLeading<A extends ActionEvent>(
+    pattern: (action: ActionEvent) => boolean,
+    worker: (action: A) => Generator<Effect, void, any>,
   ): ForkEffect;
 
   debounce<Key extends ActionNames<State>>(
@@ -92,11 +112,23 @@ export interface SagaApi<State> {
     pattern: Key,
     worker: TypedWorker<State, Key>,
   ): ForkEffect;
+  debounce(ms: number, pattern: ActionNames<State>[], worker: UntypedWorker): ForkEffect;
+  debounce<A extends ActionEvent>(
+    ms: number,
+    pattern: (action: ActionEvent) => boolean,
+    worker: (action: A) => Generator<Effect, void, any>,
+  ): ForkEffect;
 
   throttle<Key extends ActionNames<State>>(
     ms: number,
     pattern: Key,
     worker: TypedWorker<State, Key>,
+  ): ForkEffect;
+  throttle(ms: number, pattern: ActionNames<State>[], worker: UntypedWorker): ForkEffect;
+  throttle<A extends ActionEvent>(
+    ms: number,
+    pattern: (action: ActionEvent) => boolean,
+    worker: (action: A) => Generator<Effect, void, any>,
   ): ForkEffect;
 
   put<Key extends ActionNames<State>>(type: Key, ...args: ActionArgs<State, Key>): PutEffect;

@@ -160,6 +160,7 @@ Effects describe side effects declaratively. Yield them from generator functions
 Pauses the saga until a matching action is called or a message arrives on a channel.
 
 - `pattern: string` — matches the store function name exactly
+- `pattern: string[]` — matches any of the listed action names (autocompleted from store actions via the typed API)
 - `pattern: (action) => boolean` — matches when predicate returns `true`
 - `channel: Channel<Item>` — takes the next message from the channel; auto-terminates the saga on `END`
 
@@ -169,8 +170,11 @@ function* rootSaga({ take }) {
   const action = yield take('login');
   console.log(action.payload);
 
+  // Wait for any of several actions
+  const action2 = yield take(['login', 'register', 'guestLogin']);
+
   // Wait for any action matching a predicate
-  const action2 = yield take((a) => a.type.startsWith('fetch'));
+  const action3 = yield take((a) => a.type.startsWith('fetch'));
 }
 ```
 
@@ -191,7 +195,9 @@ function* saga({ take }) {
 }
 ```
 
-When used via the injected `SagaApi`, `take` only accepts valid action names from your store (string literals). The predicate and channel overloads still accept any value.
+When used via the injected `SagaApi`, `take` only accepts valid action names from your store (string literals). The predicate, array, and channel overloads still accept any value.
+
+> **Note:** Predicate and array patterns lose payload type information since there's no single action to infer from. The action is typed as `ActionEvent` (generic). Use the string overload when you need typed payloads.
 
 #### `takeMaybe(pattern)` / `takeMaybe(channel)`
 
@@ -778,13 +784,22 @@ const reqChan = yield actionChannel('request', buffers.dropping(50));
 
 Higher-level patterns built on core effects. Each helper forks an internal loop, so use with plain `yield`.
 
+All helpers accept any pattern type: a string action name, an array of action names, or a `(action) => boolean` predicate. When used via the typed `SagaApi`, string and array patterns are validated against your store's action names.
+
 #### `takeEvery(pattern, worker)`
 
 Forks `worker` saga for **every** action matching `pattern`. All instances run concurrently.
 
 ```ts
 function* rootSaga({ takeEvery }) {
+  // String — typed payload
   yield takeEvery('fetchUser', fetchUserWorker);
+
+  // Array — matches any listed action
+  yield takeEvery(['login', 'register'], authWorker);
+
+  // Predicate — custom matching, generic payload
+  yield takeEvery((a) => a.type.startsWith('analytics'), analyticsWorker);
 }
 ```
 

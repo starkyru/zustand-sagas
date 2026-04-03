@@ -74,6 +74,9 @@ export class ActionChannel {
     if (typeof pattern === 'string') {
       return action.type === pattern;
     }
+    if (Array.isArray(pattern)) {
+      return pattern.includes(action.type);
+    }
     return pattern(action);
   }
 }

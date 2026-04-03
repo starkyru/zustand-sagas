@@ -5,7 +5,7 @@ export interface ActionEvent {
   payload?: unknown;
 }
 
-export type ActionPattern = string | ((action: ActionEvent) => boolean);
+export type ActionPattern = string | string[] | ((action: ActionEvent) => boolean);
 
 // --- Store type utilities ---
 
