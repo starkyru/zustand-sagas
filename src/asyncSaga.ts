@@ -1,72 +1,236 @@
 /**
- * Factory that creates a saga watcher for an {@link AsyncSlice}.
+ * Factory that creates saga watchers for async operations.
  *
- * Given a resource name and an async fetch function, `createAsyncSaga` returns
- * a root saga that:
+ * Two modes:
  *
- * 1. Watches for `fetchX` actions via `takeLatest` (auto-cancels stale calls).
- * 2. Calls `fetchFn` with the action payload.
- * 3. On success, calls `setX(data)` on the store.
- * 4. On failure, calls `setXError(message)` on the store.
- *
- * @example
+ * **1. AsyncSlice mode** (pairs with {@link createAsyncSlice}):
  * ```ts
- * import { createAsyncSlice, createAsyncSaga, type AsyncSlice } from 'zustand-sagas';
+ * createAsyncSaga(store, 'user', fetchUser);
+ * createAsyncSaga(store, 'user', fetchUser, { retries: 3, strategy: 'debounce', debounceMs: 300 });
+ * ```
  *
- * type Store = AsyncSlice<'user', User, [id: string]>;
- *
- * const store = createStore<Store>((set) => ({
- *   ...createAsyncSlice<'user', User, [id: string]>('user', set),
- * }));
- *
- * const userSaga = createAsyncSaga(store, 'user', fetchUser);
- * // Watches for `fetchUser` actions, calls fetchUser(id),
- * // then settles with setUser(data) or setUserError(message).
+ * **2. Standalone mode** (works with any store actions):
+ * ```ts
+ * createAsyncSaga(store, {
+ *   trigger: 'loadProfile',
+ *   fetch: fetchProfile,
+ *   onSuccess: 'setProfile',
+ *   onError: 'setProfileError',
+ * });
  * ```
  */
 import type { StoreApi } from 'zustand';
-import type { ActionNames, ActionPayload, Effect, TypedActionEvent } from './types';
+import type { ActionNames, Effect } from './types';
 import type { SagaApi } from './api';
 import type { AsyncSlice } from './asyncSlice';
 
-type FetchName<Name extends string> = `fetch${Capitalize<Name>}`;
-type SetName<Name extends string> = `set${Capitalize<Name>}`;
-type SetErrorName<Name extends string> = `set${Capitalize<Name>}Error`;
+// --- Types ---
 
-/**
- * Creates a saga that watches `fetchX` and resolves the matching
- * {@link AsyncSlice} via `setX` / `setXError`.
- *
- * @param store   - The Zustand store containing the async slice.
- * @param name    - The resource name (must match the name passed to {@link createAsyncSlice}).
- * @param fetchFn - An async function that fetches the resource.
- * @returns A root saga function ready to be passed to `createSaga`.
- */
+export type AsyncSagaStrategy =
+  | 'takeLatest'
+  | 'takeEvery'
+  | 'takeLeading'
+  | 'debounce'
+  | 'throttle';
+
+export interface AsyncSagaOptions<T = unknown, State = unknown> {
+  /** Watcher strategy. Default: `'takeLatest'`. */
+  strategy?: AsyncSagaStrategy;
+  /** Milliseconds for `'debounce'` and `'throttle'` strategies. Required when using those strategies. */
+  debounceMs?: number;
+  /** Number of retry attempts on failure (0 = no retry). Default: `0`. */
+  retries?: number;
+  /** Delay between retries in ms. Default: `1000`. */
+  retryDelay?: number;
+  /** Transform the raw fetch result before settling. */
+  transform?: (raw: unknown) => T;
+  /** Generator to run after successful settlement. */
+  onSuccess?: (data: T, api: SagaApi<State>) => Generator<Effect, void, unknown>;
+  /** Generator to run after error settlement. */
+  onError?: (error: Error, api: SagaApi<State>) => Generator<Effect, void, unknown>;
+}
+
+export interface StandaloneAsyncSagaConfig<
+  State = unknown,
+  Fn extends (...args: any[]) => Promise<any> = (...args: any[]) => Promise<any>,
+> {
+  /** Action name that triggers the fetch. */
+  trigger: ActionNames<State>;
+  /** Async function to call when triggered. */
+  fetch: Fn;
+  /** Action name to call with the result on success, or a generator for custom handling. */
+  onSuccess?:
+    | ActionNames<State>
+    | ((data: Awaited<ReturnType<Fn>>, api: SagaApi<State>) => Generator<Effect, void, unknown>);
+  /** Action name to call with the error message on failure, or a generator for custom handling. */
+  onError?:
+    | ActionNames<State>
+    | ((error: Error, api: SagaApi<State>) => Generator<Effect, void, unknown>);
+  /** Watcher strategy. Default: `'takeLatest'`. */
+  strategy?: AsyncSagaStrategy;
+  /** Milliseconds for `'debounce'` and `'throttle'` strategies. */
+  debounceMs?: number;
+  /** Number of retry attempts (0 = no retry). Default: `0`. */
+  retries?: number;
+  /** Delay between retries in ms. Default: `1000`. */
+  retryDelay?: number;
+  /** Transform the raw fetch result before settling. */
+  transform?: (raw: unknown) => Awaited<ReturnType<Fn>>;
+}
+
+// --- Internals ---
+
+function applyStrategy<State>(
+  api: SagaApi<State>,
+  pattern: ActionNames<State>,
+  worker: (action: any) => Generator<Effect, void, any>,
+  strategy: AsyncSagaStrategy = 'takeLatest',
+  debounceMs?: number,
+): Effect {
+  switch (strategy) {
+    case 'takeEvery':
+      return api.takeEvery(pattern, worker as any);
+    case 'takeLeading':
+      return api.takeLeading(pattern, worker as any);
+    case 'debounce':
+      if (debounceMs == null) throw new Error('debounceMs is required for debounce strategy');
+      return api.debounce(debounceMs, pattern, worker as any);
+    case 'throttle':
+      if (debounceMs == null) throw new Error('debounceMs is required for throttle strategy');
+      return api.throttle(debounceMs, pattern, worker as any);
+    case 'takeLatest':
+    default:
+      return api.takeLatest(pattern, worker as any);
+  }
+}
+
+// --- Overloads ---
+
+/** AsyncSlice mode (backwards-compatible). */
 export function createAsyncSaga<
   Name extends string,
   Fn extends (...args: any[]) => Promise<any>,
   State extends AsyncSlice<Name, Awaited<ReturnType<Fn>>, Parameters<Fn>>,
->(store: StoreApi<State>, name: Name, fetchFn: Fn) {
-  type T = Awaited<ReturnType<Fn>>;
-  type FKey = FetchName<Name> & ActionNames<State>;
-  type Payload = ActionPayload<State, FKey>;
+>(
+  store: StoreApi<State>,
+  name: Name,
+  fetchFn: Fn,
+  options?: AsyncSagaOptions<Awaited<ReturnType<Fn>>, State>,
+): (api: SagaApi<State>) => Generator<Effect, void, unknown>;
 
-  const cap = (name.charAt(0).toUpperCase() + name.slice(1)) as Capitalize<Name>;
-  const fetchKey = `fetch${cap}` as FKey;
-  const setKey = `set${cap}` as SetName<Name> & keyof State;
-  const setErrorKey = `set${cap}Error` as SetErrorName<Name> & keyof State;
+/** Standalone mode (no AsyncSlice dependency). */
+export function createAsyncSaga<State, Fn extends (...args: any[]) => Promise<any>>(
+  store: StoreApi<State>,
+  config: StandaloneAsyncSagaConfig<State, Fn>,
+): (api: SagaApi<State>) => Generator<Effect, void, unknown>;
 
-  return function* (api: SagaApi<State>): Generator<Effect, void, unknown> {
-    yield api.takeLatest(fetchKey, function* (action: TypedActionEvent<State, FKey>) {
-      try {
-        const payload = action.payload as Payload;
-        const args = (Array.isArray(payload) ? payload : [payload]) as Parameters<Fn>;
-        const data: T = yield api.call(fetchFn, ...args);
-        yield api.call(() => (store.getState()[setKey] as (data: T) => void)(data));
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Unknown error';
-        yield api.call(() => (store.getState()[setErrorKey] as (err: string) => void)(msg));
-      }
-    });
+/** Implementation. */
+export function createAsyncSaga(
+  store: StoreApi<any>,
+  nameOrConfig: string | StandaloneAsyncSagaConfig,
+  fetchFn?: (...args: any[]) => Promise<any>,
+  options?: AsyncSagaOptions,
+) {
+  if (typeof nameOrConfig === 'string') {
+    return createSliceAsyncSaga(store, nameOrConfig, fetchFn!, options ?? {});
+  }
+  return createStandaloneAsyncSaga(store, nameOrConfig);
+}
+
+// --- AsyncSlice mode ---
+
+function createSliceAsyncSaga(
+  store: StoreApi<any>,
+  name: string,
+  fetchFn: (...args: any[]) => Promise<any>,
+  options: AsyncSagaOptions,
+) {
+  const cap = name.charAt(0).toUpperCase() + name.slice(1);
+  const fetchKey = `fetch${cap}`;
+  const setKey = `set${cap}`;
+  const setErrorKey = `set${cap}Error`;
+
+  return function* (api: SagaApi<any>): Generator<Effect, void, unknown> {
+    yield applyStrategy(
+      api,
+      fetchKey as any,
+      function* (action: any) {
+        try {
+          const payload = action.payload;
+          const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
+          let data: unknown;
+          if (options.retries && options.retries > 0) {
+            data = yield api.retry(
+              options.retries + 1,
+              options.retryDelay ?? 1000,
+              fetchFn,
+              ...args,
+            );
+          } else {
+            data = yield api.call(fetchFn, ...args);
+          }
+          if (options.transform) data = options.transform(data);
+          yield api.call(() => (store.getState()[setKey] as (d: any) => void)(data));
+          if (options.onSuccess) yield* options.onSuccess(data, api);
+        } catch (e) {
+          const error = e instanceof Error ? e : new Error('Unknown error');
+          yield api.call(() =>
+            (store.getState()[setErrorKey] as (msg: string) => void)(error.message),
+          );
+          if (options.onError) yield* options.onError(error, api);
+        }
+      },
+      options.strategy,
+      options.debounceMs,
+    );
+  };
+}
+
+// --- Standalone mode ---
+
+function createStandaloneAsyncSaga(store: StoreApi<any>, config: StandaloneAsyncSagaConfig) {
+  return function* (api: SagaApi<any>): Generator<Effect, void, unknown> {
+    yield applyStrategy(
+      api,
+      config.trigger as any,
+      function* (action: any) {
+        try {
+          const payload = action.payload;
+          const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
+          let data: unknown;
+          if (config.retries && config.retries > 0) {
+            data = yield api.retry(
+              config.retries + 1,
+              config.retryDelay ?? 1000,
+              config.fetch,
+              ...args,
+            );
+          } else {
+            data = yield api.call(config.fetch, ...args);
+          }
+          if (config.transform) data = config.transform(data);
+
+          // Settle success
+          if (typeof config.onSuccess === 'string') {
+            const key = config.onSuccess;
+            yield api.call(() => (store.getState()[key] as (d: any) => void)(data));
+          } else if (typeof config.onSuccess === 'function') {
+            yield* config.onSuccess(data, api);
+          }
+        } catch (e) {
+          const error = e instanceof Error ? e : new Error('Unknown error');
+
+          // Settle error
+          if (typeof config.onError === 'string') {
+            const key = config.onError;
+            yield api.call(() => (store.getState()[key] as (msg: string) => void)(error.message));
+          } else if (typeof config.onError === 'function') {
+            yield* config.onError(error, api);
+          }
+        }
+      },
+      config.strategy,
+      config.debounceMs,
+    );
   };
 }

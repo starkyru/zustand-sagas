@@ -72,6 +72,7 @@ export type { RunnerEnv } from './runner';
 export { createAsyncSlice } from './asyncSlice';
 export type { AsyncSlice } from './asyncSlice';
 export { createAsyncSaga } from './asyncSaga';
+export type { AsyncSagaOptions, AsyncSagaStrategy, StandaloneAsyncSagaConfig } from './asyncSaga';
 
 // Types
 export type {

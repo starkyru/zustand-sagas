@@ -2,6 +2,20 @@
 
 Generator-based side effect management for [Zustand](https://github.com/pmndrs/zustand). Inspired by redux-saga, redesigned for Zustand's function-based actions.
 
+## Table of Contents
+
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [API Reference](#api-reference)
+- [Patterns](#patterns)
+- [Recipes](./RECIPES.md) — auth flow, paginated fetch, WebSocket reconnect, optimistic updates, and more
+- [Comparison with redux-saga](#comparison-with-redux-saga)
+- [Saga Monitor](#saga-monitor)
+- [Testing Utilities](#testing-utilities)
+- [Type Safety](#type-safety)
+- [Types](#types)
+
 ## Install
 
 ```bash
@@ -887,23 +901,14 @@ const store = createStore<Store>((set) => ({
 // Actions: .fetchUser(id), .setUser(data), .setUserError(msg), .resetUser()
 ```
 
-#### `createAsyncSaga(store, name, fetchFn)`
+#### `createAsyncSaga(store, name, fetchFn, options?)`
 
-Creates a saga that watches `fetchX` actions (via `takeLatest`) and handles the full lifecycle:
+Creates a saga that watches `fetchX` actions and handles the full async lifecycle. Works in two modes:
 
-1. On `fetchX` — calls `fetchFn` with the action payload
-2. On success — calls `setX(data)`
-3. On failure — calls `setXError(message)`
-
-Stale requests are automatically cancelled (takeLatest).
+**AsyncSlice mode** — pairs with `createAsyncSlice`:
 
 ```ts
 import { createSaga, createAsyncSlice, createAsyncSaga, type AsyncSlice } from 'zustand-sagas';
-
-async function fetchUser(id: string): Promise<User> {
-  const res = await fetch(`/api/users/${id}`);
-  return res.json();
-}
 
 type Store = AsyncSlice<'user', User, [id: string]>;
 
@@ -924,19 +929,58 @@ store.getState().fetchUser('123');
 // → (on failure) isUserError: true, userError: 'Not found'
 ```
 
-Multiple async slices compose naturally:
+**Standalone mode** — works with any store actions, no `AsyncSlice` required:
 
 ```ts
-type Store = AsyncSlice<'user', User, [id: string]> &
-  AsyncSlice<'posts', Post[], [userId: string]>;
+const saga = createAsyncSaga(store, {
+  trigger: 'loadProfile',
+  fetch: fetchProfile,
+  onSuccess: 'setProfile',      // calls store.getState().setProfile(data)
+  onError: 'setProfileError',   // calls store.getState().setProfileError(message)
+});
+```
 
-const store = createStore<Store>((set) => ({
-  ...createAsyncSlice<'user', User, [id: string]>('user', set),
-  ...createAsyncSlice<'posts', Post[], [userId: string]>('posts', set),
-}));
+`onSuccess` and `onError` can also be generator functions for custom handling:
 
+```ts
+const saga = createAsyncSaga(store, {
+  trigger: 'loadProfile',
+  fetch: fetchProfile,
+  onSuccess: function* (data, api) {
+    yield api.call(() => store.setState({ profile: data }));
+    yield api.put('profileLoaded');
+  },
+});
+```
+
+**Options** (available in both modes):
+
+| Option      | Default        | Description                                                |
+|-------------|----------------|------------------------------------------------------------|
+| `strategy`  | `'takeLatest'` | `'takeLatest'`, `'takeEvery'`, `'takeLeading'`, `'debounce'`, `'throttle'` |
+| `debounceMs`| —              | Required for `'debounce'` and `'throttle'` strategies      |
+| `retries`   | `0`            | Number of retry attempts on failure                        |
+| `retryDelay`| `1000`         | Delay between retries in ms                                |
+| `transform` | —              | Transform the raw fetch result before settling             |
+| `onSuccess` | —              | Generator to run after success (AsyncSlice mode)           |
+| `onError`   | —              | Generator to run after error (AsyncSlice mode)             |
+
+```ts
+// Debounced search with retry and transform
+const searchSaga = createAsyncSaga(store, 'results', searchApi, {
+  strategy: 'debounce',
+  debounceMs: 300,
+  retries: 2,
+  retryDelay: 500,
+  transform: (raw) => raw.data.items,
+});
+```
+
+Multiple async sagas compose naturally:
+
+```ts
 const userSaga = createAsyncSaga(store, 'user', fetchUser);
-const postsSaga = createAsyncSaga(store, 'posts', fetchPosts);
+const postsSaga = createAsyncSaga(store, 'posts', fetchPosts, { strategy: 'takeEvery' });
 
 createSaga(store, function* (api) {
   yield* userSaga(api);
@@ -1020,39 +1064,6 @@ createSaga(store, function* ({ actionChannel, take, call }) {
     yield call(processOnServer, action.payload);
     yield call(() =>
       store.setState((s) => ({ ...s, results: [...s.results, action.payload] })),
-    );
-  }
-});
-```
-
-### WebSocket Integration
-
-Bridge a WebSocket into a saga using `eventChannel`:
-
-```ts
-import { eventChannel, END } from 'zustand-sagas';
-
-const store = createStore((set) => ({
-  messages: [],
-  connected: false,
-  connect: () => {},
-}));
-
-createSaga(store, function* ({ take, fork, call }) {
-  yield take('connect');
-
-  const chan = eventChannel<Message>((emit) => {
-    const ws = new WebSocket('wss://api.example.com');
-    ws.onopen = () => store.setState({ connected: true });
-    ws.onmessage = (e) => emit(JSON.parse(e.data));
-    ws.onclose = () => emit(END);
-    return () => ws.close();
-  });
-
-  while (true) {
-    const msg = yield take(chan); // loop ends automatically on END
-    yield call(() =>
-      store.setState((s) => ({ ...s, messages: [...s.messages, msg] })),
     );
   }
 });
@@ -1186,6 +1197,10 @@ createSaga(store, function* ({ take, forkWorkerChannel, takeMaybe, call }) {
   }
 });
 ```
+
+## Recipes
+
+See [RECIPES.md](./RECIPES.md) for real-world patterns: auth flows, paginated fetch with cancel, WebSocket reconnect, optimistic updates, request deduplication, zero-boilerplate async with `createAsyncSaga`, and standalone async sagas without `AsyncSlice`.
 
 ## Comparison with redux-saga
 
@@ -1539,6 +1554,9 @@ import type {
   MockTask,            // createMockTask return type (Task + setters)
   CloneableGenerator,  // Cloneable generator for testing
   AsyncSlice,          // Mapped type for async resource state + actions
+  AsyncSagaOptions,    // Options for createAsyncSaga (strategy, retries, etc.)
+  AsyncSagaStrategy,   // 'takeLatest' | 'takeEvery' | 'takeLeading' | 'debounce' | 'throttle'
+  StandaloneAsyncSagaConfig, // Config for standalone createAsyncSaga
   SagaMonitor,         // Monitor interface for custom tooling
   SagaMonitorOptions,  // Options for createSagaMonitor
   CreateSagaOptions,   // Options for createSaga (monitor, etc.)
