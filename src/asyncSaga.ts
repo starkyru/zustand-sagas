@@ -80,6 +80,20 @@ export interface StandaloneAsyncSagaConfig<
 
 // --- Internals ---
 
+/** Extract the fetch args from an AsyncSlice state type. */
+type SliceArgs<Name extends string, State> = `fetch${Capitalize<Name>}` extends keyof State
+  ? State[`fetch${Capitalize<Name>}` & keyof State] extends (...args: infer A) => any
+    ? A
+    : never
+  : never;
+
+/** Extract the data type from an AsyncSlice state type. */
+type SliceData<Name extends string, State> = `set${Capitalize<Name>}` extends keyof State
+  ? State[`set${Capitalize<Name>}` & keyof State] extends (data: infer D) => any
+    ? D
+    : never
+  : never;
+
 function applyStrategy<State>(
   api: SagaApi<State>,
   pattern: ActionNames<State>,
@@ -139,26 +153,36 @@ export function createAsyncSaga(
 
 // --- AsyncSlice mode ---
 
-function createSliceAsyncSaga(
-  store: StoreApi<any>,
-  name: string,
-  fetchFn: (...args: any[]) => Promise<any>,
-  options: AsyncSagaOptions,
+function createSliceAsyncSaga<Name extends string, State extends AsyncSlice<Name, any, any[]>>(
+  store: StoreApi<State>,
+  name: Name,
+  fetchFn: (...args: SliceArgs<Name, State>) => Promise<SliceData<Name, State>>,
+  options: AsyncSagaOptions<SliceData<Name, State>, State>,
 ) {
-  const cap = name.charAt(0).toUpperCase() + name.slice(1);
-  const fetchKey = `fetch${cap}`;
-  const setKey = `set${cap}`;
-  const setErrorKey = `set${cap}Error`;
+  type FetchKey = `fetch${Capitalize<Name>}` & keyof State;
+  type SetKey = `set${Capitalize<Name>}` & keyof State;
+  type SetErrorKey = `set${Capitalize<Name>}Error` & keyof State;
 
-  return function* (api: SagaApi<any>): Generator<Effect, void, unknown> {
+  const cap = (name.charAt(0).toUpperCase() + name.slice(1)) as Capitalize<Name>;
+  const fetchKey = `fetch${cap}` as FetchKey;
+  const setKey = `set${cap}` as SetKey;
+  const setErrorKey = `set${cap}Error` as SetErrorKey;
+
+  return function* (api: SagaApi<State>): Generator<Effect, void, unknown> {
     yield applyStrategy(
       api,
       fetchKey as any,
       function* (action: any) {
+        type Args = SliceArgs<Name, State>;
+        type Data = SliceData<Name, State>;
         try {
           const payload = action.payload;
-          const args = Array.isArray(payload) ? payload : payload !== undefined ? [payload] : [];
-          let data: unknown;
+          const args = (Array.isArray(payload)
+            ? payload
+            : payload !== undefined
+              ? [payload]
+              : []) as unknown as Args;
+          let data: Data;
           if (options.retries && options.retries > 0) {
             data = yield api.retry(
               options.retries + 1,
@@ -169,8 +193,8 @@ function createSliceAsyncSaga(
           } else {
             data = yield api.call(fetchFn, ...args);
           }
-          if (options.transform) data = options.transform(data);
-          yield api.call(() => (store.getState()[setKey] as (d: any) => void)(data));
+          if (options.transform) data = options.transform(data) as Data;
+          yield api.call(() => (store.getState()[setKey] as (d: Data) => void)(data));
           if (options.onSuccess) yield* options.onSuccess(data, api);
         } catch (e) {
           const error = e instanceof Error ? e : new Error('Unknown error');
