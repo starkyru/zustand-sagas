@@ -41,6 +41,7 @@ export interface RunnerEnv {
   channel: ActionChannel;
   getState: () => unknown;
   subscribe?: (listener: (state: unknown, prevState: unknown) => void) => () => void;
+  monitor?: import('./types').SagaMonitor;
 }
 
 const TERMINATE = Symbol('TERMINATE');
@@ -301,6 +302,8 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
   // Reject handle for propagating forked-child errors to the parent
   let rejectParent: ((error: unknown) => void) | undefined;
 
+  const monitor = env.monitor;
+
   const promise = new Promise<unknown>((resolve, reject) => {
     rejectParent = reject;
     runGenerator(saga, args).then(resolve, reject);
@@ -310,11 +313,20 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
   const task = createTask(promise, () => {
     cancelFlag = true;
+    monitor?.onTaskCancel?.(task);
     finalize();
     for (const child of children) {
       child.cancel();
     }
   });
+
+  monitor?.onTaskStart?.(task, saga, args);
+  task.toPromise().then(
+    (result) => monitor?.onTaskResult?.(task, result),
+    (error) => {
+      if (!task.isCancelled()) monitor?.onTaskError?.(task, error);
+    },
+  );
 
   return task;
 
@@ -339,6 +351,10 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
   }
 
   async function runGenerator(gen: SagaFn, genArgs: unknown[]): Promise<unknown> {
+    // Yield to microtask queue so `task` is assigned before we start
+    // processing effects (monitor callbacks need the task reference).
+    if (monitor) await Promise.resolve();
+
     const iterator = gen(...genArgs);
     let result = iterator.next();
 
@@ -348,8 +364,10 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
         return undefined;
       }
 
+      const effect = result.value as Effect;
+      monitor?.onEffectStart?.(task, effect);
       try {
-        const value = await processEffect(result.value as Effect);
+        const value = await processEffect(effect);
         if (cancelFlag) {
           iterator.return(undefined);
           return undefined;
@@ -358,12 +376,14 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
           iterator.return(undefined);
           return undefined;
         }
+        monitor?.onEffectResult?.(task, effect, value);
         result = iterator.next(value);
       } catch (error) {
         if (cancelFlag) {
           iterator.return(undefined);
           return undefined;
         }
+        monitor?.onEffectError?.(task, effect, error);
         result = iterator.throw(error);
       }
     }

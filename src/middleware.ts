@@ -1,20 +1,21 @@
 import type { StateCreator, StoreApi, StoreMutatorIdentifier } from 'zustand';
-import { createSaga, type RootSagaFn } from './createSaga';
+import { createSaga, type RootSagaFn, type CreateSagaOptions } from './createSaga';
 import type { StoreSagas } from './types';
 
 type SagasImpl = <State>(
   rootSaga: RootSagaFn<State>,
   stateCreator: StateCreator<State, [], []>,
+  options?: CreateSagaOptions,
 ) => StateCreator<State, [], [['zustand-sagas', never]]>;
 
-const sagasImpl: SagasImpl = (rootSaga, stateCreator) => (set, get, api) => {
+const sagasImpl: SagasImpl = (rootSaga, stateCreator, options) => (set, get, api) => {
   const initialState = stateCreator(set, get, api);
 
   // Zustand hasn't committed the initial state yet (the middleware return does that).
   // Force-set it so createSaga can read/wrap it.
   api.setState(initialState, true);
 
-  const useSaga = createSaga(api as StoreApi<typeof initialState>, rootSaga);
+  const useSaga = createSaga(api as StoreApi<typeof initialState>, rootSaga, options);
   (api as StoreApi<typeof initialState> & StoreSagas).sagaTask = useSaga.task;
 
   // Return the now-wrapped state from the store
@@ -28,4 +29,5 @@ export const sagas = sagasImpl as unknown as <
 >(
   rootSaga: RootSagaFn<State>,
   stateCreator: StateCreator<State, MutatorsIn, MutatorsOut>,
+  options?: CreateSagaOptions,
 ) => StateCreator<State, MutatorsIn, [['zustand-sagas', never], ...MutatorsOut]>;

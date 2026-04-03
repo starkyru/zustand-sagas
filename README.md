@@ -1288,6 +1288,66 @@ Both libraries share the same generator-based mental model:
 - **`cloneableGenerator`**, **`createMockTask`** — testing utilities
 - **`runSaga`** — run sagas outside of a store for testing
 
+## Saga Monitor
+
+`createSagaMonitor()` returns a monitor that logs task lifecycle, effect execution with timing, and errors. Attach it via the `monitor` option on `createSaga` or `sagas`.
+
+```ts
+import { createSaga, createSagaMonitor } from 'zustand-sagas';
+
+const monitor = createSagaMonitor();
+const useSaga = createSaga(store, rootSaga, { monitor });
+```
+
+Or with the middleware:
+
+```ts
+import { sagas, createSagaMonitor } from 'zustand-sagas';
+
+const store = createStore(
+  sagas(rootSaga, stateCreator, { monitor: createSagaMonitor() }),
+);
+```
+
+Sample output:
+
+```
+[task:1] started  rootSaga
+[task:1] >> TAKE('search')
+[task:1] << TAKE('search') (142.3ms)
+[task:1] >> CALL(fetchResults)
+[task:1] << CALL(fetchResults) (85.1ms)
+[task:1] done
+```
+
+### Options
+
+| Option    | Default       | Description                                      |
+|-----------|---------------|--------------------------------------------------|
+| `log`     | `console.log` | Custom log function                              |
+| `verbose` | `false`       | Include effect results and task return values     |
+| `filter`  | all           | Array of effect names to log (e.g. `['TAKE', 'CALL']`) |
+
+### Custom monitors
+
+You can also implement the `SagaMonitor` interface directly for custom tooling:
+
+```ts
+import type { SagaMonitor } from 'zustand-sagas';
+
+const myMonitor: SagaMonitor = {
+  onTaskStart(task, saga, args) { /* ... */ },
+  onTaskResult(task, result) { /* ... */ },
+  onTaskError(task, error) { /* ... */ },
+  onTaskCancel(task) { /* ... */ },
+  onEffectStart(task, effect) { /* ... */ },
+  onEffectResult(task, effect, result) { /* ... */ },
+  onEffectError(task, effect, error) { /* ... */ },
+};
+```
+
+All callbacks are optional — implement only what you need.
+
 ## Testing Utilities
 
 ### `cloneableGenerator(fn)`
@@ -1464,6 +1524,9 @@ import type {
   MockTask,            // createMockTask return type (Task + setters)
   CloneableGenerator,  // Cloneable generator for testing
   AsyncSlice,          // Mapped type for async resource state + actions
+  SagaMonitor,         // Monitor interface for custom tooling
+  SagaMonitorOptions,  // Options for createSagaMonitor
+  CreateSagaOptions,   // Options for createSaga (monitor, etc.)
   StoreSagas,
   RunnerEnv,
 } from 'zustand-sagas';

@@ -2,7 +2,7 @@ import type { StoreApi } from 'zustand';
 import { ActionChannel } from './channel';
 import { createSagaApi, type SagaApi } from './api';
 import { runSaga } from './runner';
-import type { SagaFn, Task, Effect } from './types';
+import type { SagaFn, Task, Effect, SagaMonitor } from './types';
 
 function wrapActions<State extends object>(
   state: State,
@@ -90,9 +90,14 @@ export interface UseSaga<State> {
   task: Task<void>;
 }
 
+export interface CreateSagaOptions {
+  monitor?: SagaMonitor;
+}
+
 export function createSaga<State>(
   store: StoreApi<State>,
   rootSaga: RootSagaFn<State>,
+  options?: CreateSagaOptions,
 ): UseSaga<State> {
   const channel = new ActionChannel();
   const wrapped = new WeakSet<(...args: any[]) => any>();
@@ -114,6 +119,7 @@ export function createSaga<State>(
     subscribe: store.subscribe as (
       listener: (state: unknown, prevState: unknown) => void,
     ) => () => void,
+    monitor: options?.monitor,
   };
 
   const task = runSaga((() => rootSaga(api)) as SagaFn, env) as Task<void>;

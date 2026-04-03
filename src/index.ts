@@ -1,6 +1,6 @@
 // Primary API
 export { createSaga } from './createSaga';
-export type { UseSaga, RootSagaFn } from './createSaga';
+export type { UseSaga, RootSagaFn, CreateSagaOptions } from './createSaga';
 
 // Typed API factory (for sagas defined outside createSaga)
 export { createSagaApi } from './api';
@@ -50,6 +50,10 @@ export type { Buffer } from './buffers';
 // Worker platform (for advanced/testing use)
 export { configureWorkers } from './workerPlatform';
 export type { WorkerHandle, WorkerPlatform, WorkerConfig } from './workerPlatform';
+
+// Saga monitor
+export { createSagaMonitor } from './monitor';
+export type { SagaMonitorOptions } from './monitor';
 
 // Testing utilities
 export { createMockTask } from './testing';
@@ -109,5 +113,6 @@ export type {
   Task,
   Saga,
   SagaFn,
+  SagaMonitor,
   StoreSagas,
 } from './types';

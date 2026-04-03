@@ -259,6 +259,25 @@ export type SagaFn = (...args: any[]) => Generator<Effect, unknown, any>;
 /** User-facing saga generator type. Yields return `any` so fork/take results need no casts. */
 export type Saga<Result = void> = Generator<Effect, Result, any>;
 
+// --- Saga Monitor ---
+
+export interface SagaMonitor {
+  /** Called when a saga task starts. */
+  onTaskStart?(task: Task, saga: SagaFn, args: unknown[]): void;
+  /** Called when a saga task completes successfully. */
+  onTaskResult?(task: Task, result: unknown): void;
+  /** Called when a saga task fails. */
+  onTaskError?(task: Task, error: unknown): void;
+  /** Called when a saga task is cancelled. */
+  onTaskCancel?(task: Task): void;
+  /** Called before an effect is processed. */
+  onEffectStart?(task: Task, effect: Effect): void;
+  /** Called when an effect resolves with a value. */
+  onEffectResult?(task: Task, effect: Effect, result: unknown): void;
+  /** Called when an effect throws an error. */
+  onEffectError?(task: Task, effect: Effect, error: unknown): void;
+}
+
 // --- Zustand integration ---
 
 export type StoreSagas = {
