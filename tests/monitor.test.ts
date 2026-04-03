@@ -183,4 +183,23 @@ describe('createSagaMonitor', () => {
     expect(lines.some((l) => l.includes(">> TAKE('myAction')"))).toBe(true);
     expect(lines.some((l) => l.includes("<< TAKE('myAction')"))).toBe(true);
   });
+
+  it('does not defer take registration — same-tick actions are not dropped', async () => {
+    const monitor = createSagaMonitor();
+    const received: string[] = [];
+
+    function* saga() {
+      const action = yield take('immediate');
+      received.push((action as { payload: string }).payload);
+    }
+
+    const env = createEnv(monitor);
+    runSaga(saga, env);
+
+    // Emit on the same tick — before any microtask has run
+    env.channel.emit({ type: 'immediate', payload: 'sync' });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(received).toEqual(['sync']);
+  });
 });
