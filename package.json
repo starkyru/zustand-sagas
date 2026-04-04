@@ -55,7 +55,7 @@
     "vitest": "^2.0.0",
     "zustand": "^5.0.0"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "keywords": [
     "zustand",
     "saga",

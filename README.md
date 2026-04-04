@@ -1614,4 +1614,4 @@ The middleware augments Zustand's store type to include `sagaTask` automatically
 
 ## License
 
-MIT
+AGPL-3.0-only — free for open-source use. [Commercial licenses](mailto:sagas@ilia.to) available for proprietary projects.
