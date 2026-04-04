@@ -1,0 +1,181 @@
+# zustand-sagas
+
+> Generator-based side effect management for Zustand. Inspired by redux-saga, redesigned for Zustand's function-based actions.
+
+## Install
+
+```
+npm install zustand-sagas zustand
+```
+
+## Core concept
+
+Store function names are action types. No dispatch, no action creators. `createSaga` wraps store functions — when called, the original runs first (state updates), then an `ActionEvent { type, payload }` is emitted to the saga channel.
+
+## Quick start
+
+```ts
+import { createStore } from 'zustand/vanilla';
+import { createSaga } from 'zustand-sagas';
+import type { Saga } from 'zustand-sagas';
+
+const store = createStore((set) => ({
+  count: 0,
+  incrementAsync: () => {},
+}));
+
+createSaga(store, function* ({ takeEvery, delay, select, call }): Saga {
+  yield* takeEvery('incrementAsync', function* () {
+    yield* delay(1000);
+    const count = yield* select((s) => s.count);
+    yield* call(() => store.setState({ count: count + 1 }));
+  });
+});
+
+store.getState().incrementAsync();
+```
+
+## yield* for typed results
+
+Use `yield*` (not `yield`) for full TypeScript type inference on effect results:
+
+```ts
+const action = yield* take('increment');      // TypedActionEvent<State, 'increment'>
+const count = yield* select((s) => s.count);  // number
+const task = yield* fork(mySaga);             // Task<Result>
+const data = yield* call(fetchUser, id);      // User
+const winner = yield* race({
+  data: call(fetchApi),
+  timeout: delay(5000),
+});  // { data: Response | undefined, timeout: true | undefined }
+```
+
+Plain `yield` works at runtime but returns `unknown` at the type level.
+
+## Effects reference
+
+All effects are available via the `SagaApi<State>` object injected into the root saga, or as standalone imports from `zustand-sagas`.
+
+### Action effects
+- `take(pattern)` — pause until matching action. Pattern: string, string[], predicate, or Channel
+- `takeMaybe(pattern)` — like take, but returns END instead of terminating on channel close
+- `put('actionName', ...args)` — emit action to saga channel (does NOT call store action)
+- `putApply('actionName', argsArray)` — like put but args as array
+
+### State
+- `select(selector?)` — read store state. No selector = full state
+- `until(predicate, timeout?)` — wait for state predicate to be truthy. Returns true or END on timeout
+
+### Async
+- `call(fn, ...args)` — call function, wait for result. Generators run as sub-sagas, promises awaited
+- `cps(fn, ...args)` — call Node.js callback-style function
+- `delay(ms)` — pause for ms milliseconds. Returns true
+- `retry(maxTries, delayMs, fn, ...args)` — retry function up to N times
+
+### Concurrency
+- `fork(saga, ...args)` — start attached child task. Returns Task. Errors propagate to parent
+- `spawn(saga, ...args)` — start detached task. Returns Task. Independent lifecycle
+- `join(task)` — wait for task to complete. Returns result
+- `cancel(task)` — cancel running task (cooperative)
+- `race({ key: effect })` — first effect to complete wins, others cancelled
+- `all([effects])` — wait for all effects. Cancels all on any rejection
+- `allSettled([effects])` — wait for all, never rejects. Returns SettledResult[]
+
+### Channels
+- `actionChannel(pattern, buffer?)` — buffer matching actions into a channel
+- `flush(channel)` — drain all buffered messages as array
+
+### Workers (Web Worker / worker thread)
+- `callWorker(fn|url, ...args)` — blocking, run in worker
+- `forkWorker(fn|url, ...args)` — non-blocking attached worker task
+- `spawnWorker(fn|url, ...args)` — non-blocking detached worker task
+- `forkWorkerChannel(fn, ...args)` — worker streams values via channel
+- `callWorkerGen(fn, handler, ...args)` — bidirectional worker communication
+
+### Helpers (higher-level, fork internal loops)
+- `takeEvery(pattern, worker)` — fork worker for every matching action
+- `takeLatest(pattern, worker)` — fork worker, cancel previous on new action
+- `takeLeading(pattern, worker)` — run worker, ignore actions until complete
+- `debounce(ms, pattern, worker)` — wait ms after last action before running
+- `throttle(ms, pattern, worker)` — at most one worker per ms
+
+## Channels
+
+- `channel<T>(buffer?)` — point-to-point, single taker receives each message
+- `multicastChannel<T>()` — broadcast, all takers receive each message
+- `eventChannel<T>(subscribe, buffer?)` — bridge external events (WebSocket, DOM, etc.)
+- `END` — channel termination signal
+
+## Buffers
+
+`buffers.none()`, `buffers.fixed(n)`, `buffers.dropping(n)`, `buffers.sliding(n)`, `buffers.expanding()`
+
+## Async helpers
+
+```ts
+// createAsyncSlice generates state + actions for async resources
+type Store = AsyncSlice<'user', User, [id: string]>;
+const store = createStore<Store>((set) => ({
+  ...createAsyncSlice<'user', User, [id: string]>('user', set),
+}));
+
+// createAsyncSaga watches fetchX and handles loading/error/success
+const userSaga = createAsyncSaga(store, 'user', fetchUser);
+createSaga(store, function* (api) { yield* userSaga(api); });
+```
+
+Options: strategy (takeLatest|takeEvery|takeLeading|debounce|throttle), retries, retryDelay, transform, onSuccess, onError.
+
+Standalone mode (no AsyncSlice): `createAsyncSaga(store, { trigger, fetch, onSuccess, onError })`.
+
+## State updates from sagas
+
+State mutations happen in store actions, not sagas. To update state from a saga:
+
+```ts
+yield* call(() => store.setState({ count: newCount }));
+```
+
+## Payload convention
+
+| Call | payload |
+|------|---------|
+| `increment()` | `undefined` |
+| `addTodo('buy milk')` | `'buy milk'` |
+| `setPosition(10, 20)` | `[10, 20]` |
+
+## Testing
+
+- `cloneableGenerator(fn)` — clone generators at branch points
+- `createMockTask()` — mock Task for testing fork/join/cancel
+- `runSaga(saga, env, ...args)` — run saga without a store
+
+## Task interface
+
+```ts
+interface Task<Result> {
+  id: number;
+  isRunning(): boolean;
+  isCancelled(): boolean;
+  result(): Result | undefined;
+  toPromise(): Promise<Result>;
+  cancel(): void;
+}
+```
+
+## Key types
+
+```ts
+import type {
+  Saga,              // Generator<Effect, Result, unknown> — annotate saga return type
+  SagaApi,           // Typed effects injected into root saga
+  ActionEvent,       // { type: string; payload?: unknown }
+  TypedActionEvent,  // Typed action for specific store action
+  Effect,            // Union of all effect types
+  Task,              // Running saga handle
+  EffectDescriptor,  // Marker interface for yield* support
+  EffectResult,      // Extract resolved type from effect
+  Channel,
+  Buffer,
+} from 'zustand-sagas';
+```
