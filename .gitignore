@@ -5,3 +5,5 @@ coverage
 .claude/*
 !.claude/skills
 IDEAS.md
+.DS_Store
+TODO.md

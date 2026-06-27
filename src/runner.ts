@@ -774,6 +774,13 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
           }
         }
 
+        // A closed-channel take branch resolves to TERMINATE — behave like a
+        // bare `take(closedChannel)` and terminate the saga rather than leaking
+        // the sentinel into user code as `{ key: TERMINATE }`.
+        if (winner.value === TERMINATE) {
+          return TERMINATE;
+        }
+
         const result: Record<string, unknown> = {};
         for (const [key] of entries) {
           result[key] = key === winner.key ? winner.value : undefined;

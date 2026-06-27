@@ -35,7 +35,15 @@ export class ActionChannel {
     // Persistent subscriptions (for actionChannel routing)
     for (const sub of this.subscriptions) {
       if (this.matches(sub.pattern, action)) {
-        sub.callback(action);
+        // Isolate each subscriber: a throwing callback (e.g. an actionChannel
+        // buffer overflow) must not abort the loop or escape to the dispatcher,
+        // which would crash the store action that emitted this event. Report it
+        // loudly without taking down the host.
+        try {
+          sub.callback(action);
+        } catch (err) {
+          console.error('[zustand-sagas] action subscription threw during emit:', err);
+        }
       }
     }
   }
