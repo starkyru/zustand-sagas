@@ -206,9 +206,15 @@ class EventChannelImpl<Item> extends BasicChannel<Item> {
   }
 }
 
+/**
+ * Bridges an external event source into a channel. Matches redux-saga's default:
+ * **`buffers.none()`** — events emitted while no taker is waiting are **dropped**.
+ * Pass an explicit buffer (`expanding`/`sliding`/`fixed`) to retain bursts that
+ * outpace the consuming saga.
+ */
 export function eventChannel<Item>(
   subscribe: (emitter: (input: Item | END) => void) => () => void,
   buffer?: Buffer<Item>,
 ): Channel<Item> {
-  return new EventChannelImpl<Item>(subscribe, buffer ?? buffers.expanding<Item>());
+  return new EventChannelImpl<Item>(subscribe, buffer ?? buffers.none<Item>());
 }

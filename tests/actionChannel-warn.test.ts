@@ -50,4 +50,28 @@ describe('actionChannel unbounded-buffer growth warning (RO-6)', () => {
 
     warnSpy.mockRestore();
   });
+
+  it('does not warn when warnOnUnboundedActionChannel is false', async () => {
+    const THRESHOLD = 10_000;
+    const env: RunnerEnv = {
+      channel: new ActionChannel(),
+      getState: () => ({}),
+      warnOnUnboundedActionChannel: false,
+    };
+
+    function* saga(): Generator<Effect, void, any> {
+      yield actionChannel('ping');
+      yield take('never');
+    }
+    runSaga(saga, env);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Overflow well past the threshold — the warning must stay silent.
+    for (let i = 0; i < THRESHOLD + 5; i++) env.channel.emit({ type: 'ping' });
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
 });

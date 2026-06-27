@@ -17,6 +17,7 @@ import {
   PUT,
   JOIN,
   CANCEL,
+  CANCELLED,
   CPS,
   DELAY,
   CALL_WORKER,
@@ -42,6 +43,13 @@ export interface RunnerEnv {
   getState: () => unknown;
   subscribe?: (listener: (state: unknown, prevState: unknown) => void) => () => void;
   monitor?: import('./types').SagaMonitor;
+  /**
+   * Emit a one-time console warning when an undrained actionChannel backlog
+   * crosses the safety threshold. Defaults to `true`; set `false` to silence it
+   * (e.g. when unbounded growth is intentional). Only an explicit `false`
+   * disables the warning.
+   */
+  warnOnUnboundedActionChannel?: boolean;
 }
 
 const TERMINATE = Symbol('TERMINATE');
@@ -374,8 +382,7 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
     while (!result.done) {
       if (cancelFlag) {
-        iterator.return(undefined);
-        return undefined;
+        return finalizeGenerator(iterator);
       }
 
       const effect = result.value as Effect;
@@ -383,25 +390,49 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
       try {
         const value = await processEffect(effect);
         if (cancelFlag) {
-          iterator.return(undefined);
-          return undefined;
+          return finalizeGenerator(iterator);
         }
         if (value === TERMINATE) {
-          iterator.return(undefined);
-          return undefined;
+          return finalizeGenerator(iterator);
         }
         monitor?.onEffectResult?.(taskRef.current!, effect, value);
         result = iterator.next(value);
       } catch (error) {
         if (cancelFlag) {
-          iterator.return(undefined);
-          return undefined;
+          return finalizeGenerator(iterator);
         }
         monitor?.onEffectError?.(taskRef.current!, effect, error);
         result = iterator.throw(error);
       }
     }
 
+    return result.value;
+  }
+
+  /**
+   * Drive a generator's `finally` blocks to completion when it is being torn
+   * down (cancellation or END/TERMINATE), processing any effects they yield so
+   * cleanup logic — `yield* cancelled()`, `yield* call(cleanup)`, etc. — actually
+   * runs instead of being silently discarded by a bare `iterator.return()`.
+   *
+   * `cancelFlag` is left untouched, so `cancelled()` reads `true` during a
+   * cancellation teardown and `false` during a normal END teardown. Avoid
+   * blocking effects (`take`, `delay`) here: in-flight-effect cleanups have
+   * already been flushed, so they cannot be force-resolved and will hang.
+   */
+  async function finalizeGenerator(
+    iterator: Generator<unknown, unknown, unknown>,
+  ): Promise<unknown> {
+    let result = iterator.return(undefined);
+    while (!result.done) {
+      const effect = result.value as Effect;
+      try {
+        const value = await processEffect(effect);
+        result = value === TERMINATE ? iterator.return(undefined) : iterator.next(value);
+      } catch (error) {
+        result = iterator.throw(error);
+      }
+    }
     return result.value;
   }
 
@@ -603,6 +634,14 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
         return undefined;
       }
 
+      case CANCELLED: {
+        // True only while finalizing this saga because it was cancelled — see
+        // finalizeGenerator. During normal execution the loop diverts to
+        // finalization before any post-cancel effect is processed, so this
+        // always reads false outside a cancellation-triggered finally block.
+        return cancelFlag;
+      }
+
       case CPS: {
         return new Promise((resolve, reject) => {
           effect.fn(...effect.args, (error: unknown, result?: unknown) => {
@@ -667,10 +706,11 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
       case ACTION_CHANNEL: {
         const chan = createChannel<import('./types').ActionEvent>(effect.buffer);
+        const warnEnabled = env.warnOnUnboundedActionChannel !== false;
         let warned = false;
         const subId = env.channel.subscribe(effect.pattern, (action) => {
           chan.put(action);
-          if (!warned && (chan.size?.() ?? 0) > ACTION_CHANNEL_WARN_THRESHOLD) {
+          if (warnEnabled && !warned && (chan.size?.() ?? 0) > ACTION_CHANNEL_WARN_THRESHOLD) {
             warned = true;
             console.warn(
               `[zustand-sagas] actionChannel buffer exceeded ${ACTION_CHANNEL_WARN_THRESHOLD} ` +
@@ -775,31 +815,38 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
         const entries = Object.entries(effect.effects);
         const branches: Cancellable[] = entries.map(([, eff]) => processEffectCancellable(eff));
 
-        const racePromises = branches.map((branch, i) =>
-          branch.promise.then((value) => ({ key: entries[i][0], value })),
-        );
+        // Cascade parent cancel into pending branches; removed on settle so a
+        // later finalize cannot cancel the winner's branch.
+        const removeBranchesCleanup = addCleanup(() => branches.forEach((b) => b.cancel()));
+        try {
+          const racePromises = branches.map((branch, i) =>
+            branch.promise.then((value) => ({ key: entries[i][0], value })),
+          );
 
-        const winner = await Promise.race(racePromises);
+          const winner = await Promise.race(racePromises);
 
-        // Cancel all losing branches
-        for (let i = 0; i < branches.length; i++) {
-          if (entries[i][0] !== winner.key) {
-            branches[i].cancel();
+          // Cancel all losing branches
+          for (let i = 0; i < branches.length; i++) {
+            if (entries[i][0] !== winner.key) {
+              branches[i].cancel();
+            }
           }
-        }
 
-        // A closed-channel take branch resolves to TERMINATE — behave like a
-        // bare `take(closedChannel)` and terminate the saga rather than leaking
-        // the sentinel into user code as `{ key: TERMINATE }`.
-        if (winner.value === TERMINATE) {
-          return TERMINATE;
-        }
+          // A closed-channel take branch resolves to TERMINATE — behave like a
+          // bare `take(closedChannel)` and terminate the saga rather than leaking
+          // the sentinel into user code as `{ key: TERMINATE }`.
+          if (winner.value === TERMINATE) {
+            return TERMINATE;
+          }
 
-        const result: Record<string, unknown> = {};
-        for (const [key] of entries) {
-          result[key] = key === winner.key ? winner.value : undefined;
+          const result: Record<string, unknown> = {};
+          for (const [key] of entries) {
+            result[key] = key === winner.key ? winner.value : undefined;
+          }
+          return result;
+        } finally {
+          removeBranchesCleanup();
         }
-        return result;
       }
 
       case ALL: {
@@ -811,6 +858,9 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
           }
         });
 
+        // Cascade parent cancel into pending branches; removed on settle (success
+        // or failure) so a later finalize cannot re-cancel settled branches.
+        const removeBranchesCleanup = addCleanup(() => branches.forEach((b) => b.cancel()));
         try {
           const results = await Promise.all(branches.map((b) => b.promise));
           return results;
@@ -818,6 +868,8 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
           // Cancel remaining effects when one fails
           for (const branch of branches) branch.cancel();
           throw err;
+        } finally {
+          removeBranchesCleanup();
         }
       }
 

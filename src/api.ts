@@ -8,6 +8,7 @@ import {
   put,
   join,
   cancel,
+  cancelled,
   cps,
   delay,
   retry,
@@ -161,6 +162,7 @@ export interface SagaApi<State> {
   spawn: typeof spawn;
   join: typeof join;
   cancel: typeof cancel;
+  cancelled: typeof cancelled;
   cps: typeof cps;
   delay: typeof delay;
   retry: typeof retry;
@@ -202,6 +204,7 @@ export function createSagaApi<State>(): SagaApi<State> {
     spawn,
     join,
     cancel,
+    cancelled,
     cps,
     delay,
     retry,

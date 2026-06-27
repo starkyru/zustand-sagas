@@ -74,6 +74,7 @@ export const FORK: unique symbol = Symbol('FORK');
 export const SPAWN: unique symbol = Symbol('SPAWN');
 export const PUT: unique symbol = Symbol('PUT');
 export const CANCEL: unique symbol = Symbol('CANCEL');
+export const CANCELLED: unique symbol = Symbol('CANCELLED');
 export const JOIN: unique symbol = Symbol('JOIN');
 export const CPS: unique symbol = Symbol('CPS');
 export const DELAY: unique symbol = Symbol('DELAY');
@@ -160,6 +161,10 @@ export interface JoinEffect<Result = unknown> extends EffectDescriptor<Result> {
 export interface CancelEffect<Result = unknown> extends EffectDescriptor<void> {
   type: typeof CANCEL;
   task: Task<Result>;
+}
+
+export interface CancelledEffect extends EffectDescriptor<boolean> {
+  type: typeof CANCELLED;
 }
 
 export type CpsCallback<Result = unknown> = (error: unknown, result?: Result) => void;
@@ -301,6 +306,7 @@ export type Effect =
   | PutEffect
   | JoinEffect
   | CancelEffect
+  | CancelledEffect
   | CpsEffect
   | DelayEffect
   | RaceEffect

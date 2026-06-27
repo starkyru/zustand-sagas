@@ -77,12 +77,13 @@ All effects are available via the `SagaApi<State>` object injected into the root
 - `spawn(saga, ...args)` — start detached task. Returns Task. Independent lifecycle
 - `join(task)` — wait for task to complete. Returns result
 - `cancel(task)` — cancel running task (cooperative)
+- `cancelled()` — true if current saga is being torn down due to cancellation. Use in try/finally; finally-yielded effects still run
 - `race({ key: effect })` — first effect to complete wins, others cancelled
 - `all([effects])` — wait for all effects. Cancels all on any rejection
 - `allSettled([effects])` — wait for all, never rejects. Returns SettledResult[]
 
 ### Channels
-- `actionChannel(pattern, buffer?)` — buffer matching actions into a channel
+- `actionChannel(pattern, buffer?)` — buffer matching actions into a channel. Default buffer `expanding()` (unbounded); runner warns once if an undrained backlog exceeds 10k. Disable via `createSaga(store, saga, { warnOnUnboundedActionChannel: false })`
 - `flush(channel)` — drain all buffered messages as array
 
 ### Workers (Web Worker / worker thread)
@@ -101,9 +102,9 @@ All effects are available via the `SagaApi<State>` object injected into the root
 
 ## Channels
 
-- `channel<T>(buffer?)` — point-to-point, single taker receives each message
+- `channel<T>(buffer?)` — point-to-point, single taker receives each message. Default buffer `expanding()` (unbounded), matches redux-saga
 - `multicastChannel<T>()` — broadcast, all takers receive each message
-- `eventChannel<T>(subscribe, buffer?)` — bridge external events (WebSocket, DOM, etc.)
+- `eventChannel<T>(subscribe, buffer?)` — bridge external events (WebSocket, DOM, etc.). Default buffer `none()` (matches redux-saga): events emitted with no waiting taker are DROPPED — pass `buffers.expanding()`/`sliding(n)` for bursty sources
 - `END` — channel termination signal
 
 ## Buffers

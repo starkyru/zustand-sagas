@@ -377,7 +377,7 @@ store.getState().search('zustand sagas'); // cancels page 2, starts fresh
 Exponential backoff reconnection with jitter — the socket drops, the saga reconnects, and the component never knows. Event channels turn the WebSocket into a pull-based stream; `race` adds the timeout. Compare this to writing a custom `baseQuery` with reconnect logic in RTK Query.
 
 ```ts
-import { eventChannel, END } from 'zustand-sagas';
+import { eventChannel, buffers, END } from 'zustand-sagas';
 
 const store = createStore((set) => ({
   messages: [],
@@ -389,6 +389,9 @@ const store = createStore((set) => ({
 
 function createWsChannel(url: string) {
   let ws: WebSocket;
+  // eventChannel defaults to buffers.none() — events emitted while the saga
+  // isn't parked in a `take` are dropped. A socket can fire several `onmessage`
+  // in one tick, so buffer them to avoid losing messages between takes.
   const chan = eventChannel<{ type: string; data?: unknown }>((emit) => {
     ws = new WebSocket(url);
     ws.onopen = () => emit({ type: 'open' });
@@ -396,7 +399,7 @@ function createWsChannel(url: string) {
     ws.onerror = () => emit({ type: 'error' });
     ws.onclose = () => emit(END);
     return () => ws.close();
-  });
+  }, buffers.expanding());
   return { chan, getWs: () => ws };
 }
 

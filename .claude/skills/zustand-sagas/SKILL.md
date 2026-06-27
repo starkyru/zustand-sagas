@@ -75,6 +75,15 @@ const result = yield* join(task);
 // Cancel task
 yield* cancel(task);
 
+// Detect cancellation in cleanup (true only when torn down by cancel)
+try {
+  yield* take('never');
+} finally {
+  if (yield* cancelled()) {
+    yield* call(rollback); // finally-yielded effects still run during teardown
+  }
+}
+
 // Delay
 yield* delay(1000);
 
@@ -137,6 +146,9 @@ const msg = yield* take(chan);
 const multi = multicastChannel<string>();
 
 // External events (WebSocket, DOM, etc.)
+// Default buffer is buffers.none() (matches redux-saga): events emitted with no
+// waiting taker are DROPPED. Pass a buffer for bursty sources, e.g.
+// eventChannel(subscribe, buffers.expanding()).
 const wsChan = eventChannel<Message>((emit) => {
   const ws = new WebSocket(url);
   ws.onmessage = (e) => emit(JSON.parse(e.data));

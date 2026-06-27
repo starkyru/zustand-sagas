@@ -8,6 +8,7 @@ import {
   PUT,
   JOIN,
   CANCEL,
+  CANCELLED,
   CPS,
   DELAY,
   CALL_WORKER,
@@ -31,6 +32,7 @@ import {
   type PutEffect,
   type JoinEffect,
   type CancelEffect,
+  type CancelledEffect,
   type CpsEffect,
   type DelayEffect,
   type RaceEffect,
@@ -145,6 +147,15 @@ export function cps<Fn extends (...args: any[]) => void>(
 
 export function cancel<Result>(task: Task<Result>): CancelEffect<Result> {
   return makeEffect({ type: CANCEL, task }) as CancelEffect<Result>;
+}
+
+/**
+ * Resolves to `true` if the current saga has been cancelled. Intended for use
+ * inside a `try/finally` block so cleanup can branch on whether it is running
+ * because of cancellation versus normal completion.
+ */
+export function cancelled(): CancelledEffect {
+  return makeEffect({ type: CANCELLED }) as CancelledEffect;
 }
 
 export function delay(ms: number): DelayEffect {

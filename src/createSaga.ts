@@ -117,6 +117,13 @@ export interface UseSaga<State> {
 
 export interface CreateSagaOptions {
   monitor?: SagaMonitor;
+  /**
+   * Emit a one-time `console.warn` when an undrained `actionChannel` backlog
+   * crosses the internal safety threshold (a likely unbounded-growth leak).
+   * Defaults to `true`; set `false` to silence it when unbounded growth is
+   * intentional.
+   */
+  warnOnUnboundedActionChannel?: boolean;
 }
 
 // A store can host only one active saga at a time. Two concurrent sagas on one
@@ -159,6 +166,7 @@ export function createSaga<State>(
       listener: (state: unknown, prevState: unknown) => void,
     ) => () => void,
     monitor: options?.monitor,
+    warnOnUnboundedActionChannel: options?.warnOnUnboundedActionChannel,
   };
 
   const task = runSaga((() => rootSaga(api)) as SagaFn, env) as Task<void>;

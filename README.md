@@ -521,6 +521,27 @@ function* saga({ fork, cancel, delay }) {
 }
 ```
 
+#### `cancelled()`
+
+Resolves to `true` if the current saga is being torn down because it was cancelled, `false` otherwise. Use it inside a `try/finally` so cleanup can tell cancellation apart from normal completion. Effects yielded from the `finally` block still run during teardown.
+
+```ts
+function* saga({ take, call, cancelled }) {
+  try {
+    while (true) {
+      const action = yield take('start');
+      yield call(doWork, action);
+    }
+  } finally {
+    if (yield cancelled()) {
+      yield call(rollback); // only when cancelled, not on normal exit
+    }
+  }
+}
+```
+
+> Avoid blocking effects (`take`, `delay`) inside a `finally` reached via cancellation — in-flight cleanups have already been flushed, so they cannot be force-resolved and will hang.
+
 #### `delay(ms)`
 
 Pauses the saga for `ms` milliseconds.
@@ -650,6 +671,8 @@ import { buffers } from 'zustand-sagas';
 const chan = yield actionChannel('request', buffers.sliding(5));
 ```
 
+> **Unbounded by default.** Like redux-saga, the default `buffers.expanding()` grows without limit. An `actionChannel` that is never drained (no `take` keeping up) leaks memory. The runner logs a one-time `console.warn` once the undrained backlog crosses a safety threshold. Pass a bounded buffer (`sliding`/`dropping`/`fixed`) for hot patterns, or silence the warning with `createSaga(store, rootSaga, { warnOnUnboundedActionChannel: false })` when unbounded growth is intentional.
+
 #### `flush(channel)`
 
 Drains all buffered messages from a channel and returns them as an array.
@@ -716,6 +739,8 @@ chan.put('hello'); // delivered to both
 Bridges external event sources (WebSocket, DOM events, timers, SSE) into a channel that sagas can `take` from.
 
 The `subscribe` function receives an `emit` callback and must return an unsubscribe function. Emitting `END` closes the channel.
+
+> **Default buffer is `buffers.none()` (matches redux-saga).** Events emitted while no saga is waiting in a `take` are **dropped**. For bursty sources (WebSocket, rapid timers) that can outpace the consuming loop, pass an explicit buffer to retain them: `eventChannel(subscribe, buffers.expanding())` (or `sliding`/`fixed`).
 
 ```ts
 import { eventChannel, END } from 'zustand-sagas';

@@ -3,6 +3,7 @@ import { runSaga, type RunnerEnv } from '../src/runner';
 import { ActionChannel } from '../src/channel';
 import { take, takeMaybe, fork, delay } from '../src/effects';
 import { eventChannel, channel, END } from '../src/channels';
+import { buffers } from '../src/buffers';
 
 function createEnv(): RunnerEnv {
   return {
@@ -43,6 +44,60 @@ describe('eventChannel in sagas', () => {
     // take(channel) auto-terminates on END
     expect(received).toEqual([1, 2, 3]);
     expect(task.isRunning()).toBe(false);
+  });
+
+  it('default buffer is buffers.none(): events emitted before a taker registers are dropped', async () => {
+    const received: number[] = [];
+
+    function* saga() {
+      // subscribe runs synchronously here, before the first `take` below —
+      // so 1 and 2 are emitted with no waiting taker.
+      const chan = eventChannel<number>((emit) => {
+        emit(1); // dropped — none() has no capacity and no taker is waiting
+        emit(2); // dropped
+        setTimeout(() => {
+          emit(3); // delivered — a taker is waiting by now
+          emit(END);
+        }, 10);
+        return () => {};
+      });
+
+      while (true) {
+        const value = yield take(chan);
+        received.push(value);
+      }
+    }
+
+    runSaga(saga, createEnv());
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(received).toEqual([3]);
+  });
+
+  it('an explicit buffer retains events emitted before a taker registers', async () => {
+    const received: number[] = [];
+
+    function* saga() {
+      const chan = eventChannel<number>((emit) => {
+        emit(1); // buffered
+        emit(2); // buffered
+        setTimeout(() => {
+          emit(3);
+          emit(END);
+        }, 10);
+        return () => {};
+      }, buffers.expanding<number>());
+
+      while (true) {
+        const value = yield take(chan);
+        received.push(value);
+      }
+    }
+
+    runSaga(saga, createEnv());
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(received).toEqual([1, 2, 3]);
   });
 
   it('takeMaybe receives END as a value', async () => {
