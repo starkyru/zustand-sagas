@@ -19,7 +19,8 @@ export class ActionChannel {
   private nextSubId = 0;
 
   emit(action: ActionEvent): void {
-    // Multicast to ALL matching one-shot takers (same action, all receive it)
+    // Multicast to ALL matching one-shot takers (same action object reference,
+    // all receive it — treat the action as immutable)
     const matched: number[] = [];
     for (let i = 0; i < this.takers.length; i++) {
       if (this.matches(this.takers[i].pattern, action)) {

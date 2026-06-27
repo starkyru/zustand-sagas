@@ -24,12 +24,17 @@ export interface WorkerConfig {
 
 let workerConfig: WorkerConfig = { nodeWorkerMode: 'cjs' };
 
+// Bumped on every reconfigure so an in-flight async platform init started under
+// an older config cannot overwrite `cachedPlatform` after `configureWorkers` runs.
+let platformGeneration = 0;
+
 /** Configure worker code generation. Call before any worker effects are used. */
 export function configureWorkers(config: Partial<WorkerConfig>): void {
   workerConfig = { ...workerConfig, ...config };
   // Reset cached platform so it picks up the new config
   cachedPlatform = null;
   pendingInit = null;
+  platformGeneration++;
 }
 
 // --- Browser implementation ---
@@ -125,11 +130,14 @@ export async function getPlatformAsync(): Promise<WorkerPlatform> {
   }
 
   // Node.js — dynamic import for ESM compatibility
+  const gen = platformGeneration;
   // @ts-expect-error — node:worker_threads may not have type declarations
   pendingInit = import('node:worker_threads').then(
     (wt) => {
-      cachedPlatform = createNodePlatform(wt);
-      return cachedPlatform;
+      const platform = createNodePlatform(wt);
+      // Only publish to the cache if no reconfigure happened mid-import.
+      if (gen === platformGeneration) cachedPlatform = platform;
+      return platform;
     },
     () => {
       throw new Error(

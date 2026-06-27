@@ -168,6 +168,11 @@ export function channel<Item>(buffer?: Buffer<Item>): Channel<Item> {
   return new BasicChannel<Item>(buffer ?? buffers.expanding<Item>());
 }
 
+/**
+ * A channel where every pending taker receives each put item. Note: all takers
+ * receive the **same object reference** — treat delivered items as immutable, as
+ * mutating one taker's copy corrupts it for the others.
+ */
 export function multicastChannel<Item>(): Channel<Item> {
   return new MulticastChannelImpl<Item>();
 }

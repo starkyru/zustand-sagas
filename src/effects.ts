@@ -193,6 +193,11 @@ export function retry<Fn extends (...args: any[]) => any>(
   fn: Fn,
   ...args: Parameters<Fn>
 ): RetryEffect<Fn> {
+  // Guard against a silent no-op: maxTries < 1 would skip the runner's retry
+  // loop entirely and resolve to undefined without ever calling fn.
+  if (!Number.isInteger(maxTries) || maxTries < 1) {
+    throw new Error(`retry: maxTries must be an integer >= 1, got ${String(maxTries)}`);
+  }
   return makeEffect({
     type: RETRY,
     maxTries,
@@ -202,6 +207,14 @@ export function retry<Fn extends (...args: any[]) => any>(
   }) as RetryEffect<Fn>;
 }
 
+/**
+ * Worker effects (`callWorker`, `forkWorker`, `spawnWorker`, `forkWorkerChannel`,
+ * `callWorkerGen`) serialize the supplied function via `fn.toString()` and rebuild
+ * it inside the worker. The function therefore **must be fully self-contained**:
+ * closure variables, module imports, and `this` are NOT available at runtime — they
+ * are silently lost. Pass everything the worker needs through `args` (which are
+ * structured-cloned), or load dependencies inside the function body.
+ */
 export function callWorker<Fn extends WorkerFn>(
   fn: Fn,
   ...args: WorkerArgs<Fn>

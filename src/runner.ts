@@ -721,7 +721,7 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
           return true;
         }
 
-        return new Promise<true | typeof END>((resolve) => {
+        return new Promise<true | typeof END | typeof TERMINATE>((resolve) => {
           let timeoutId: ReturnType<typeof setTimeout> | undefined;
           let settled = false;
 
@@ -751,7 +751,9 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
               settled = true;
               if (timeoutId !== undefined) clearTimeout(timeoutId);
               unsubscribe();
-              resolve(true);
+              // On finalize/cancel, terminate the saga (consistent with `take`)
+              // rather than resolving `true` as if the predicate were met.
+              resolve(TERMINATE);
             }
           });
         });
