@@ -93,6 +93,8 @@ store.getState().increment(5)
 
 Attaches sagas to an existing Zustand store. Returns a `useSaga` function for accessing typed effects in child sagas. When the saga task completes or is cancelled, `createSaga` restores the store's original `setState` — safe for tests and re-attachment.
 
+> **One saga per store.** A store hosts a single active saga at a time — compose everything into one root saga (use `fork`/`spawn` for concurrency). Calling `createSaga` on a store that already has an active saga throws; cancel the existing one (`useSaga.task.cancel()`) first to re-attach.
+
 ```ts
 import { createStore } from 'zustand/vanilla';
 import { createSaga } from 'zustand-sagas';

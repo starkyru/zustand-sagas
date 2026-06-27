@@ -119,11 +119,25 @@ export interface CreateSagaOptions {
   monitor?: SagaMonitor;
 }
 
+// A store can host only one active saga at a time. Two concurrent sagas on one
+// store would stack setState interceptors and leak the inner saga's channel, so
+// the second attach is rejected. Sequential re-attach (cancel, then create
+// again) is fine — teardown removes the store from this set.
+const activeSagaStores = new WeakSet<StoreApi<unknown>>();
+
 export function createSaga<State>(
   store: StoreApi<State>,
   rootSaga: RootSagaFn<State>,
   options?: CreateSagaOptions,
 ): UseSaga<State> {
+  if (activeSagaStores.has(store as StoreApi<unknown>)) {
+    throw new Error(
+      '[zustand-sagas] this store already has an active saga. Cancel the existing saga ' +
+        '(task.cancel()) before creating another, or compose everything into one root saga.',
+    );
+  }
+  activeSagaStores.add(store as StoreApi<unknown>);
+
   const channel = new ActionChannel();
   const wrapperToOriginal = new WeakMap<(...args: any[]) => any, (...args: any[]) => any>();
 
@@ -148,9 +162,17 @@ export function createSaga<State>(
   };
 
   const task = runSaga((() => rootSaga(api)) as SagaFn, env) as Task<void>;
+
+  // Release the store on teardown: restore setState and free the store so a new
+  // saga may attach. Idempotent — called from both completion and cancel.
+  const releaseStore = () => {
+    restoreSetState();
+    activeSagaStores.delete(store as StoreApi<unknown>);
+  };
+
   task
     .toPromise()
-    .finally(restoreSetState)
+    .finally(releaseStore)
     .catch(() => {});
 
   // Wrap cancel to also unwrap action functions so the old channel can be
@@ -158,7 +180,7 @@ export function createSaga<State>(
   const originalCancel = task.cancel.bind(task);
   task.cancel = () => {
     originalCancel();
-    restoreSetState();
+    releaseStore();
     const teardownState = store.getState();
     if (typeof teardownState === 'object' && teardownState !== null) {
       store.setState(
