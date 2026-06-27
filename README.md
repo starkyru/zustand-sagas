@@ -296,7 +296,7 @@ function* saga({ select }) {
 Starts a new saga as an **attached** (child) task. The parent continues immediately without waiting. Returns a `Task`. Saga arguments are type-checked.
 
 - Parent cancellation cascades to forked children
-- Child errors propagate to the parent
+- Child errors propagate to the parent **as soon as the child fails**, aborting the parent (and cancelling its other children). To handle a child's failure, `join` it promptly or handle the error inside the child — see [`join`](#jointask).
 
 ```ts
 function* rootSaga({ fork }) {
@@ -492,14 +492,20 @@ configureWorkers({ nodeWorkerMode: 'esm' });
 
 #### `join(task)`
 
-Waits for a forked/spawned task to complete. Returns the task's result.
+Waits for a forked/spawned task to complete. `join` resolves to the task's **outcome**: if the task returned, you get its result; if the task threw, `join` rethrows that error, so wrap it in `try/catch` to handle it.
 
 ```ts
 function* saga({ fork, join }) {
   const task = yield fork(worker);
-  const result = yield join(task);
+  try {
+    const result = yield join(task);
+  } catch (err) {
+    // the worker's error, delivered at the join
+  }
 }
 ```
+
+> **Gotcha — join promptly, or the error bubbles.** An attached [`fork`](#forksaga-args) propagates a child's error to the parent the moment it happens. If the child fails **before** the parent reaches `join`, that propagation aborts the parent first and the later `join` is never reached — its `try/catch` won't run. So `join` right after the fork (as above), or `spawn` to detach the task (errors don't propagate), or handle the error inside the worker. Joining a task that fails *while* you're already waiting on the join works as expected.
 
 #### `cancel(task)`
 
