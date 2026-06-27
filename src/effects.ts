@@ -176,6 +176,15 @@ export function allSettled<Effects extends readonly Effect[]>(
   }) as AllSettledEffect<Effects>;
 }
 
+/**
+ * Buffer matching actions for later sequential processing.
+ *
+ * **Default buffer is `buffers.expanding()` — UNBOUNDED.** An actionChannel that
+ * is never drained (no `take` keeping up with incoming actions) grows without
+ * limit and leaks memory. The runner logs a one-time `console.warn` once the
+ * backlog crosses a safety threshold. For hot patterns you might not keep up
+ * with, pass an explicit bounded buffer (`buffers.sliding/dropping/fixed`).
+ */
 export function actionChannel(
   pattern: ActionPattern,
   buffer?: Buffer<ActionEvent>,

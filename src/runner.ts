@@ -46,6 +46,9 @@ export interface RunnerEnv {
 
 const TERMINATE = Symbol('TERMINATE');
 const WORKER_GRACE_PERIOD_MS = 100;
+// An actionChannel with the default (unbounded) buffer that is never drained
+// grows without limit. Warn once past this backlog so a likely leak is visible.
+const ACTION_CHANNEL_WARN_THRESHOLD = 10_000;
 
 interface Cancellable {
   promise: Promise<unknown>;
@@ -664,8 +667,17 @@ export function runSaga(saga: SagaFn, env: RunnerEnv, ...args: unknown[]): Task 
 
       case ACTION_CHANNEL: {
         const chan = createChannel<import('./types').ActionEvent>(effect.buffer);
+        let warned = false;
         const subId = env.channel.subscribe(effect.pattern, (action) => {
           chan.put(action);
+          if (!warned && (chan.size?.() ?? 0) > ACTION_CHANNEL_WARN_THRESHOLD) {
+            warned = true;
+            console.warn(
+              `[zustand-sagas] actionChannel buffer exceeded ${ACTION_CHANNEL_WARN_THRESHOLD} ` +
+                `undrained items — the saga may not be taking from it (possible memory leak). ` +
+                `Pass a bounded buffer (sliding/dropping/fixed) if unbounded growth is not intended.`,
+            );
+          }
         });
         addCleanup(() => env.channel.unsubscribe(subId));
         return chan;

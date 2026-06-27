@@ -8,6 +8,8 @@ export interface Channel<Item> {
   put(item: Item | END): void;
   close(): void;
   flush(): Item[];
+  /** Current number of buffered (undrained) items. Optional for backwards compatibility. */
+  size?(): number;
   readonly __isChannel: true;
 }
 
@@ -98,6 +100,10 @@ class BasicChannel<Item> implements Channel<Item> {
   flush(): Item[] {
     return this.buffer.flush();
   }
+
+  size(): number {
+    return this.buffer.size?.() ?? 0;
+  }
 }
 
 // --- MulticastChannel: all takers receive each message ---
@@ -159,6 +165,10 @@ class MulticastChannelImpl<Item> implements Channel<Item> {
   flush(): Item[] {
     // Multicast has no buffer
     return [];
+  }
+
+  size(): number {
+    return 0;
   }
 }
 

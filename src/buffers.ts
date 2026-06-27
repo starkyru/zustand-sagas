@@ -3,6 +3,8 @@ export interface Buffer<Item> {
   put(item: Item): void;
   take(): Item | undefined;
   flush(): Item[];
+  /** Current number of buffered items. Optional for backwards compatibility. */
+  size?(): number;
 }
 
 class NoneBuffer<Item> implements Buffer<Item> {
@@ -17,6 +19,9 @@ class NoneBuffer<Item> implements Buffer<Item> {
   }
   flush(): Item[] {
     return [];
+  }
+  size(): number {
+    return 0;
   }
 }
 
@@ -41,6 +46,9 @@ class FixedBuffer<Item> implements Buffer<Item> {
     this.items = [];
     return result;
   }
+  size(): number {
+    return this.items.length;
+  }
 }
 
 class DroppingBuffer<Item> implements Buffer<Item> {
@@ -63,6 +71,9 @@ class DroppingBuffer<Item> implements Buffer<Item> {
     const result = this.items;
     this.items = [];
     return result;
+  }
+  size(): number {
+    return this.items.length;
   }
 }
 
@@ -87,6 +98,9 @@ class SlidingBuffer<Item> implements Buffer<Item> {
     this.items = [];
     return result;
   }
+  size(): number {
+    return this.items.length;
+  }
 }
 
 class ExpandingBuffer<Item> implements Buffer<Item> {
@@ -105,6 +119,9 @@ class ExpandingBuffer<Item> implements Buffer<Item> {
     const result = this.items;
     this.items = [];
     return result;
+  }
+  size(): number {
+    return this.items.length;
   }
 }
 
